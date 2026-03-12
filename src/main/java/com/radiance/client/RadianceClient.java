@@ -4,6 +4,9 @@ import com.mojang.logging.LogUtils;
 import com.radiance.client.option.Options;
 import com.radiance.client.pipeline.Pipeline;
 import com.radiance.client.proxy.vulkan.RendererProxy;
+import com.radiance.client.vr.VRMouseState;
+import com.radiance.client.vr.XRSessionController;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.JarURLConnection;
@@ -93,6 +96,11 @@ public class RadianceClient implements ClientModInitializer {
         Options.readOptions();
 
         Pipeline.reloadAllModuleEntries();
+
+        // VR keyboard+mouse sync: each tick, push mouseYaw → worldOrientation
+        // and sync player facing from HMD direction. No-op when VR is disabled.
+        ClientTickEvents.START_CLIENT_TICK.register(VRMouseState::syncPerTick);
+        ClientTickEvents.END_CLIENT_TICK.register(XRSessionController::tick);
     }
 
     public void copyFileFromResource(Path targetPath, Path resourcePath) {
