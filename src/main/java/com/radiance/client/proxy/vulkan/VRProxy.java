@@ -110,8 +110,9 @@ public class VRProxy {
     // ---- Performance stats ----
 
     /**
-     * Returns [gpuFrameTimeMs, cpuFrameTimeMs, compositorTargetMs, fps, droppedFrames, headroom].
-     * headroom = (target - actual) / target; negative means frame drops.
+     * Returns [gpuFrameTimeMs, cpuFrameTimeMs, cpuWorkMs, cpuWaitMs, compositorTargetMs, fps, droppedFrames, headroom].
+     * cpuWorkMs = active CPU work; cpuWaitMs = time blocked in xrWaitFrame compositor pacing.
+     * headroom = (target - max(cpuWorkMs, gpuMs)) / target; negative means frame drops.
      */
     public static native float[] nativeGetPerformanceStats();
 
@@ -200,7 +201,7 @@ public class VRProxy {
         nativeStopVibration(hand);
     }
 
-    /** Get performance stats [gpuMs, cpuMs, targetMs, fps, drops, headroom]. */
+    /** Get performance stats [gpuMs, frameMs, targetMs, fps, drops, headroom]. */
     public static float[] getPerformanceStats() {
         return nativeGetPerformanceStats();
     }
@@ -232,6 +233,17 @@ public class VRProxy {
     /** OpenXR session state (0=UNKNOWN .. 5=FOCUSED .. 8=EXITING). */
     public static int getSessionState() {
         return nativeGetSessionState();
+    }
+
+    /** True when OpenXR session is in an active renderable state. */
+    public static boolean isSessionRunning() {
+        int state = getSessionState();
+        return state >= 2 && state <= 5; // READY..FOCUSED
+    }
+
+    /** True when renderer is using desktop/non-XR path for the current frame. */
+    public static boolean isDesktopPathActive() {
+        return !isEnabled() || !isSessionRunning();
     }
 
     /** Start the OpenXR session (transition from flat mode to VR). */

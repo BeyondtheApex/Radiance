@@ -7,6 +7,7 @@ import net.minecraft.client.MinecraftClient;
 public final class XRSessionController {
 
     private static boolean lastTargetActive = false;
+    private static boolean lastDesktopPath = true;
 
     private XRSessionController() {
     }
@@ -19,18 +20,26 @@ public final class XRSessionController {
         boolean inWorld = client.world != null && client.isFinishedLoading();
         boolean targetActive = Options.vrEnabled && inWorld;
 
-        if (targetActive == lastTargetActive) {
-            return;
-        }
-
         // Keep runtime prepared according to user setting, but only run XR session in-world.
         VRProxy.setEnabled(Options.vrEnabled);
 
-        if (targetActive) {
+        if (targetActive && !lastTargetActive) {
             lastTargetActive = VRProxy.startXRSession();
-        } else {
+        } else if (!targetActive && lastTargetActive) {
             VRProxy.stopXRSession();
             lastTargetActive = false;
+        } else if (!targetActive) {
+            lastTargetActive = false;
+        }
+
+        boolean desktopPath = VRProxy.isDesktopPathActive();
+        if (desktopPath != lastDesktopPath) {
+            if (desktopPath) {
+                VRMouseState.enterDesktopPath();
+            } else {
+                VRMouseState.enterXRPath();
+            }
+            lastDesktopPath = desktopPath;
         }
     }
 }

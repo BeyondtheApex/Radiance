@@ -24,7 +24,7 @@ public final class VRMouseState {
      * Sets worldOrientation from mouseYaw and syncs player facing from HMD.
      */
     public static void syncPerTick(net.minecraft.client.MinecraftClient client) {
-        if (!VRProxy.isEnabled() || !mouseTrackingEnabled || client.player == null) return;
+        if (!VRProxy.isSessionRunning() || !mouseTrackingEnabled || client.player == null) return;
 
         // 1. Push mouseYaw as worldOrientation quaternion to C++.
         //    worldOrientation = rotateY(mouseYaw_rad)
@@ -59,5 +59,18 @@ public final class VRMouseState {
         client.player.setYaw((float) Math.toDegrees(Math.atan2(-wx, wz)));
         client.player.setPitch((float) Math.toDegrees(
             Math.asin(Math.max(-1.0, Math.min(1.0, -fy)))));
+    }
+
+    /** Enter desktop path: clear tracking-space offsets and restore vanilla mouse behavior. */
+    public static void enterDesktopPath() {
+        mouseTrackingEnabled = false;
+        mouseYaw = 0.0f;
+        VRProxy.nativeSetWorldOrientation(0.0f, 0.0f, 0.0f, 1.0f);
+        VRProxy.setWorldPosition(0.0f, 0.0f, 0.0f);
+    }
+
+    /** Enter XR path: enable mouse-based tracking-space yaw control again. */
+    public static void enterXRPath() {
+        mouseTrackingEnabled = true;
     }
 }

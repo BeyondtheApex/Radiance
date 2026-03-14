@@ -19,7 +19,7 @@ public class VRMouseSyncMixin {
 
     @Inject(method = "changeLookDirection", at = @At("HEAD"), cancellable = true)
     private void radiance$interceptMouseForVR(double cursorDeltaX, double cursorDeltaY, CallbackInfo ci) {
-        if (!VRProxy.isEnabled() || !VRMouseState.mouseTrackingEnabled) return;
+        if (!VRProxy.isSessionRunning() || !VRMouseState.mouseTrackingEnabled) return;
         if (!((Object) this instanceof ClientPlayerEntity)) return;
 
         // Accumulate yaw only (MC convention: cursorDeltaX * 0.15 = degrees).
