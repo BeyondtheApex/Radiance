@@ -49,7 +49,7 @@ public abstract class NativeImageMixins implements
         int unpackSkipRows, int regionWidth, int regionHeight, boolean blur, CallbackInfo ci) {
         try {
             INativeImageExt self = (INativeImageExt) this;
-            int targetId = self.neoVoxelRT$getTargetID();
+            int targetId = self.radiance$getTargetID();
 
             AuxiliaryTextures.loadAndUpload((NativeImage) (Object) this, self, level, offsetX,
                 offsetY, unpackSkipPixels, unpackSkipRows, regionWidth, regionHeight, blur);
@@ -67,9 +67,9 @@ public abstract class NativeImageMixins implements
     @Inject(method = "close()V", at = @At(value = "HEAD"))
     public void closeImage(CallbackInfo ci) {
         INativeImageExt self = (INativeImageExt) this;
-        NativeImage specularImage = self.neoVoxelRT$getSpecularNativeImage();
-        NativeImage normalImage = self.neoVoxelRT$getNormalNativeImage();
-        NativeImage flagImage = self.neoVoxelRT$getFlagNativeImage();
+        NativeImage specularImage = self.radiance$getSpecularNativeImage();
+        NativeImage normalImage = self.radiance$getNormalNativeImage();
+        NativeImage flagImage = self.radiance$getFlagNativeImage();
         if (specularImage != null) {
             specularImage.close();
         }
@@ -82,7 +82,7 @@ public abstract class NativeImageMixins implements
     }
 
     @Override
-    public NativeImage neoVoxelRT$alignTo(NativeImage source) {
+    public NativeImage radiance$alignTo(NativeImage source) {
         int targetWidth = source.getWidth();
         int targetHeight = source.getHeight();
         NativeImage.Format targetFormat = source.getFormat();
@@ -105,7 +105,7 @@ public abstract class NativeImageMixins implements
                 long srcPixelPtr =
                     this.pointer + (sampleX + (long) sampleY * this.width) * srcChannels;
                 long destPixelPtr =
-                    ((com.radiance.mixin_related.extensions.vulkan_render_integration.INativeImageExt) (Object) dest).neoVoxelRT$getPointer()
+                    ((com.radiance.mixin_related.extensions.vulkan_render_integration.INativeImageExt) (Object) dest).radiance$getPointer()
                         + (long) (x + (long) y * targetWidth) * destChannels;
 
                 for (int c = 0; c < commonChannels; c++) {
@@ -124,7 +124,7 @@ public abstract class NativeImageMixins implements
     }
 
     @Override
-    public long neoVoxelRT$getPointer() {
+    public long radiance$getPointer() {
         return pointer;
     }
 
@@ -163,7 +163,7 @@ public abstract class NativeImageMixins implements
     }
 
     @Override
-    public void neoVoxelRT$loadFromTextureImageWithoutUI(int level, boolean removeAlpha) {
+    public void radiance$loadFromTextureImageWithoutUI(int level, boolean removeAlpha) {
         RenderSystem.assertOnRenderThread();
         this.checkAllocated();
         RendererProxy.takeScreenshot(false, this.width, this.height, this.format.getChannelCount(),

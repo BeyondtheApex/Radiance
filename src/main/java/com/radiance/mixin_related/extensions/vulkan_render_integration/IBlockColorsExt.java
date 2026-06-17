@@ -7,6 +7,6 @@ import org.jetbrains.annotations.Nullable;
 
 public interface IBlockColorsExt {
 
-    float neoVoxelRT$getEmission(BlockState state, @Nullable BlockRenderView world,
+    float radiance$getEmission(BlockState state, @Nullable BlockRenderView world,
         @Nullable BlockPos pos, int tintIndex);
 }

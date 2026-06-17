@@ -25,6 +25,8 @@ import org.lwjgl.system.MemoryStack;
 
 public class BufferProxy {
 
+    private static final int WORLD_UBO_SIZE = 896;
+
     public static native int allocateBuffer();
 
     public static native void initializeBuffer(int id, int size, int usageFlags);
@@ -77,91 +79,6 @@ public class BufferProxy {
         return new VertexIndexBufferHandle(vertexId, indexId);
     }
 
-    public static native void updateOverlayDrawUniform(long ptr);
-
-    public static void updateOverlayDrawUniform() {
-        try (MemoryStack stack = stackPush()) {
-            int size = 336;
-            ByteBuffer bb = stack.malloc(size);
-            long addr = memAddress(bb);
-            int baseAddr = 0;
-
-            for (int i = 0; i < 12; i++) {
-                int texture = RenderSystem.getShaderTexture(i);
-                bb.putInt(baseAddr, texture);
-                baseAddr += Integer.BYTES;
-            }
-
-            Matrix4f modelViewMat = RenderSystem.getModelViewMatrix();
-            modelViewMat.get(baseAddr, bb);
-            baseAddr += Float.BYTES * 16;
-
-            Matrix4f projectionMatrix = RenderSystem.getProjectionMatrix();
-            projectionMatrix.get(baseAddr, bb);
-            baseAddr += Float.BYTES * 16;
-
-            float[] shaderColor = RenderSystem.getShaderColor();
-            for (int i = 0; i < 4; i++) {
-                bb.putFloat(baseAddr, shaderColor[i]);
-                baseAddr += Float.BYTES;
-            }
-
-            float shaderGlintAlpha = RenderSystem.getShaderGlintAlpha();
-            bb.putFloat(baseAddr, shaderGlintAlpha);
-            baseAddr += Float.BYTES;
-
-            Fog fog = RenderSystem.getShaderFog();
-            float fogStart = fog.start();
-            bb.putFloat(baseAddr, fogStart);
-            baseAddr += Float.BYTES;
-
-            float fogEnd = fog.end();
-            bb.putFloat(baseAddr, fogEnd);
-            baseAddr += Float.BYTES;
-
-            int fogShape = fog.shape().getId();
-            bb.putInt(baseAddr, fogShape);
-            baseAddr += Integer.BYTES;
-
-            float[] fogColor = {fog.red(), fog.green(), fog.blue(), fog.alpha()};
-            for (int i = 0; i < 4; i++) {
-                bb.putFloat(baseAddr, fogColor[i]);
-                baseAddr += Float.BYTES;
-            }
-
-            Matrix4f textureMat = RenderSystem.getTextureMatrix();
-            textureMat.get(baseAddr, bb);
-            baseAddr += Float.BYTES * 16;
-
-            float gameTime = RenderSystem.getShaderGameTime();
-            bb.putFloat(baseAddr, gameTime);
-            baseAddr += Float.BYTES;
-
-            float lineWidth = RenderSystem.getShaderLineWidth();
-            bb.putFloat(baseAddr, lineWidth);
-            baseAddr += Float.BYTES;
-
-            float framebufferWidth = MinecraftClient.getInstance().getWindow()
-                .getFramebufferWidth();
-            bb.putFloat(baseAddr, framebufferWidth);
-            baseAddr += Float.BYTES;
-
-            float framebufferHeight = MinecraftClient.getInstance().getWindow()
-                .getFramebufferHeight();
-            bb.putFloat(baseAddr, framebufferHeight);
-            baseAddr += Float.BYTES;
-
-            Vector3f shaderLightDirection0 = RenderSystem.shaderLightDirections[0];
-            shaderLightDirection0.get(baseAddr, bb);
-            baseAddr += Float.BYTES * 4;
-
-            Vector3f shaderLightDirection1 = RenderSystem.shaderLightDirections[1];
-            shaderLightDirection1.get(baseAddr, bb);
-
-            updateOverlayDrawUniform(addr);
-        }
-    }
-
     public static native void updateOverlayPostUniform(long ptr);
 
     public static void updateOverlayPostUniform(float radius) {
@@ -203,11 +120,12 @@ public class BufferProxy {
 
     public static void updateWorldUniform(Camera camera, Matrix4f viewMatrix,
         Matrix4f effectedViewMatrix, Matrix4f projectionMatrix, int overlayTextureID, Fog fog,
-        ClientWorld world, int endSkyTextureID, int endPortalTextureID) {
+        ClientWorld world, int endSkyTextureID, int endPortalTextureID, int lightMapTextureID) {
         try (MemoryStack stack = stackPush()) {
-            int size = 832; // must match sizeof(WorldUBO) in shared.hpp (includes VR stereo fields)
+            int size = WORLD_UBO_SIZE;
             ByteBuffer bb = stack.malloc(size);
             long addr = memAddress(bb);
+            memSet(addr, 0, size);
             int baseAddr = 0;
 
             viewMatrix.get(baseAddr, bb);
@@ -256,21 +174,30 @@ public class BufferProxy {
             baseAddr += Integer.BYTES;
             bb.putInt(baseAddr, world.getDimensionEffects().getSkyType().ordinal());
             baseAddr += Integer.BYTES;
+            baseAddr += Integer.BYTES;
+            baseAddr += Integer.BYTES;
 
-            baseAddr += Float.BYTES; // rayBounces
-            baseAddr += Float.BYTES; // pad
-
             baseAddr += Double.BYTES; // cameraPos
             baseAddr += Double.BYTES; // cameraPos
             baseAddr += Double.BYTES; // cameraPos
             baseAddr += Double.BYTES; // cameraPos
+            baseAddr += Integer.BYTES; // chunkGridInfo
+            baseAddr += Integer.BYTES; // chunkGridInfo
+            baseAddr += Integer.BYTES; // chunkGridInfo
+            baseAddr += Integer.BYTES; // chunkGridInfo
+            baseAddr += Integer.BYTES; // chunkStorageSectionPos
+            baseAddr += Integer.BYTES; // chunkStorageSectionPos
+            baseAddr += Integer.BYTES; // chunkStorageSectionPos
+            baseAddr += Integer.BYTES; // chunkStorageSectionPos
 
             bb.putInt(baseAddr, endSkyTextureID);
             baseAddr += Integer.BYTES;
             bb.putInt(baseAddr, endPortalTextureID);
             baseAddr += Integer.BYTES;
+            bb.putInt(baseAddr, lightMapTextureID);
             baseAddr += Integer.BYTES;
-            baseAddr += Integer.BYTES;
+            baseAddr += Integer.BYTES; // pad4
+            baseAddr += Integer.BYTES; // pad5
 
             updateWorldUniform(addr);
         }
@@ -279,12 +206,12 @@ public class BufferProxy {
     public static native void updateSkyUniform(long ptr);
 
     public static void updateSkyUniform(float baseColorR, float baseColorG, float baseColorB,
-        float horizontalColorR, float horizontalColorG, float horizontalColorB,
-        float horizontalColorA, Vector3f sunDirection, int skyType, boolean sunRisingOrSetting,
-        boolean skyDark, boolean hasBlindnessOrDarkness, int submersionType, int moonPhase,
-        float rainGradient, int sunTextureID, int moonTextureID) {
+        float horizonColorR, float horizonColorG, float horizonColorB, float horizonColorA,
+        Vector3f sunDirection, int skyType, boolean sunRisingOrSetting, boolean skyDark,
+        boolean hasBlindnessOrDarkness, int submersionType, int moonPhase, float rainGradient,
+        int sunTextureID, int moonTextureID) {
         try (MemoryStack stack = stackPush()) {
-            int size = 160;
+            int size = 80;
             ByteBuffer bb = stack.malloc(size);
             long addr = memAddress(bb);
             int baseAddr = 0;
@@ -298,13 +225,13 @@ public class BufferProxy {
             bb.putInt(baseAddr, skyType);
             baseAddr += Integer.BYTES;
 
-            bb.putFloat(baseAddr, horizontalColorR);
+            bb.putFloat(baseAddr, horizonColorR);
             baseAddr += Float.BYTES;
-            bb.putFloat(baseAddr, horizontalColorG);
+            bb.putFloat(baseAddr, horizonColorG);
             baseAddr += Float.BYTES;
-            bb.putFloat(baseAddr, horizontalColorB);
+            bb.putFloat(baseAddr, horizonColorB);
             baseAddr += Float.BYTES;
-            bb.putFloat(baseAddr, horizontalColorA);
+            bb.putFloat(baseAddr, horizonColorA);
             baseAddr += Float.BYTES;
 
             bb.putFloat(baseAddr, sunDirection.x);
@@ -323,24 +250,14 @@ public class BufferProxy {
             bb.putInt(baseAddr, submersionType);
             baseAddr += Integer.BYTES;
             bb.putInt(baseAddr, moonPhase);
-            baseAddr += Integer.BYTES; // moonPhase
-
+            baseAddr += Integer.BYTES;
             bb.putFloat(baseAddr, rainGradient);
             baseAddr += Float.BYTES;
-            baseAddr += Float.BYTES;
-            baseAddr += Float.BYTES;
-            baseAddr += Float.BYTES; // padding
-
-            // AtmosphereParams
-            baseAddr += Float.BYTES * 4 * 3; // skip
-
-            baseAddr += Float.BYTES * 3; // sunRadiance
             bb.putInt(baseAddr, sunTextureID);
-            baseAddr += Integer.BYTES; // sunTextureID
-
-            baseAddr += Float.BYTES * 3; // moonRadiance
+            baseAddr += Integer.BYTES;
             bb.putInt(baseAddr, moonTextureID);
-            baseAddr += Integer.BYTES; // moonTextureID
+            baseAddr += Integer.BYTES;
+            bb.putInt(baseAddr, 0);
 
             updateSkyUniform(addr);
         }
@@ -397,46 +314,8 @@ public class BufferProxy {
         }
     }
 
-    public static native void updateLightMapUniform(long ptr);
-
-    public static void updateLightMapUniform(float ambientLightFactor, float skyFactor,
-        float blockFactor, boolean useBrightLightmap, Vector3f skyLightColor,
-        float nightVisionFactor, float darknessScale, float darkenWorldFactor,
-        float brightnessFactor) {
-        try (MemoryStack stack = stackPush()) {
-            int size = 48;
-            ByteBuffer bb = stack.malloc(size);
-            long addr = memAddress(bb);
-            int baseAddr = 0;
-
-            bb.putFloat(baseAddr, ambientLightFactor);
-            baseAddr += Float.BYTES;
-            bb.putFloat(baseAddr, skyFactor);
-            baseAddr += Float.BYTES;
-            bb.putFloat(baseAddr, blockFactor);
-            baseAddr += Float.BYTES;
-            bb.putInt(baseAddr, useBrightLightmap ? 1 : 0);
-            baseAddr += Integer.BYTES;
-
-            bb.putFloat(baseAddr, skyLightColor.x);
-            baseAddr += Float.BYTES;
-            bb.putFloat(baseAddr, skyLightColor.y);
-            baseAddr += Float.BYTES;
-            bb.putFloat(baseAddr, skyLightColor.z);
-            baseAddr += Float.BYTES;
-            bb.putFloat(baseAddr, nightVisionFactor);
-            baseAddr += Float.BYTES;
-
-            bb.putFloat(baseAddr, darknessScale);
-            baseAddr += Float.BYTES;
-            bb.putFloat(baseAddr, darkenWorldFactor);
-            baseAddr += Float.BYTES;
-            bb.putFloat(baseAddr, brightnessFactor);
-            baseAddr += Float.BYTES;
-            baseAddr += Integer.BYTES; // pad0
-
-            updateLightMapUniform(addr);
-        }
+    public static void updateEmission() {
+        // Emission tiles are uploaded immediately through TextureProxy during texture upload.
     }
 
     public record BufferInfo(ByteBuffer buf, long addr, int size) {

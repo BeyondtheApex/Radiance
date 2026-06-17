@@ -4,5 +4,5 @@ import net.minecraft.client.texture.AbstractTexture;
 
 public interface IOverlayTextureExt {
 
-    AbstractTexture neoVoxelRT$getTexture();
+    AbstractTexture radiance$getTexture();
 }

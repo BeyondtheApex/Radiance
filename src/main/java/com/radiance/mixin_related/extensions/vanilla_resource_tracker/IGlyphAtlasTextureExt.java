@@ -4,5 +4,5 @@ import net.minecraft.client.font.BakedGlyph;
 
 public interface IGlyphAtlasTextureExt {
 
-    BakedGlyph neoVoxelRT$bake(IRenderableGlyphExt glyph);
+    BakedGlyph radiance$bake(IRenderableGlyphExt glyph);
 }

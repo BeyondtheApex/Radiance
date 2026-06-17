@@ -18,6 +18,6 @@ public abstract class NativeImageBackedTextureMixins extends AbstractTextureMixi
     @Inject(method = "upload()V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/texture/NativeImage;upload(IIIZ)V"))
     public void setTargetIDBeforeUpload(CallbackInfo ci) {
         int id = getGlId();
-        ((INativeImageExt) (Object) image).neoVoxelRT$setTargetID(id);
+        ((INativeImageExt) (Object) image).radiance$setTargetID(id);
     }
 }

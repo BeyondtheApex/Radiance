@@ -4,6 +4,7 @@ import static com.radiance.client.proxy.world.EntityProxy.PARTICLE_COUNTERS;
 
 import com.llamalad7.mixinextras.sugar.Local;
 import com.radiance.mixin_related.extensions.vulkan_render_integration.IParticleManagerExt;
+import com.radiance.mixin_related.extensions.vulkan_render_integration.IParticleExt;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +14,8 @@ import net.minecraft.client.particle.Particle;
 import net.minecraft.client.particle.ParticleManager;
 import net.minecraft.client.particle.ParticleTextureSheet;
 import net.minecraft.particle.ParticleEffect;
+import net.minecraft.registry.Registries;
+import net.minecraft.util.Identifier;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -32,12 +35,12 @@ public class ParticleManagerMixins implements IParticleManagerExt {
     private Map<ParticleTextureSheet, Queue<Particle>> particles;
 
     @Override
-    public List<ParticleTextureSheet> neoVoxelRT$getTextureSheets() {
+    public List<ParticleTextureSheet> radiance$getTextureSheets() {
         return PARTICLE_TEXTURE_SHEETS;
     }
 
     @Override
-    public Map<ParticleTextureSheet, Queue<Particle>> neoVoxelRT$getParticles() {
+    public Map<ParticleTextureSheet, Queue<Particle>> radiance$getParticles() {
         return particles;
     }
 
@@ -82,6 +85,22 @@ public class ParticleManagerMixins implements IParticleManagerExt {
 //                    cir.setReturnValue(null);
 //                }
 //            }
+        }
+
+        Identifier particleId = Registries.PARTICLE_TYPE.getId(parameters.getType());
+        if (particleId != null) {
+            ((IParticleExt) particle).radiance$setContentName(
+                EntityContentNames.toParticleContentName(particleId));
+        }
+    }
+
+    private static final class EntityContentNames {
+
+        private static String toParticleContentName(Identifier particleId) {
+            if ("minecraft".equals(particleId.getNamespace())) {
+                return "/particle/" + particleId.getPath();
+            }
+            return "/particle/" + particleId.getNamespace() + "/" + particleId.getPath();
         }
     }
 }

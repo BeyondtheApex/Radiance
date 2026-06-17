@@ -1,7 +1,10 @@
 package com.radiance.client.option;
 
 import com.radiance.client.RadianceClient;
+import com.radiance.client.pipeline.Pipeline;
+import com.radiance.client.proxy.vulkan.TextureProxy;
 import com.radiance.client.proxy.vulkan.VRProxy;
+import com.radiance.client.proxy.world.ChunkProxy;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -20,6 +23,7 @@ public class Options {
     public static final String CATEGORY_UPSCALER = "options.video.category.upscaler";
     public static final String CATEGORY_TERRAIN = "options.video.category.terrain";
     public static final String CATEGORY_PIPELINE = "options.video.category.pipeline";
+    public static final String CATEGORY_VR = "options.video.category.vr";
 
     public static final String DLSS_MODE_PERFORMANCE_TOOLTIP = "options.video.dlss_mode.performance.tooltip";
     public static final String DLSS_MODE_BALANCED_TOOLTIP = "options.video.dlss_mode.balanced.tooltip";
@@ -38,7 +42,15 @@ public class Options {
     public static final String RAY_BOUNCES_KEY = "options.video.ray_bounces";
     public static final String CHUNK_BUILDING_BATCH_SIZE_KEY = "options.video.chunk_building_batch_size";
     public static final String CHUNK_BUILDING_TOTAL_BATCHES_KEY = "options.video.chunk_building_total_batches";
+    public static final String CHUNK_BUILDING_THREADS_KEY = "options.video.chunk_building_threads";
+    public static final String COLLECT_CHUNK_EMISSION_KEY = "options.video.collect_chunk_emission";
+    public static final String SHADER_PACK_SETUP_KEY = "options.video.shader_pack_setup";
     public static final String PIPELINE_SETUP_KEY = "options.video.pipeline_setup";
+    public static final String VR_ENABLED_KEY = "options.video.vr.enabled";
+    public static final String VR_RENDER_SCALE_KEY = "options.video.vr.render_scale";
+    public static final String VR_IPD_KEY = "options.video.vr.ipd";
+    public static final String VR_WORLD_SCALE_KEY = "options.video.vr.world_scale";
+    public static final String POST_STEREO_SIMULATOR_KEY = "options.video.post_stereo_simulator";
 
     public static final String UPSCALER_TYPE_NATIVE = "options.video.upscaler_type.native";
     public static final String UPSCALER_TYPE_FSR3 = "options.video.upscaler_type.fsr3";
@@ -59,12 +71,30 @@ public class Options {
     public static int upscalerQuality = 1;
     public static int denoiserMode = 1;
     public static int rayBounces = 4;
-    public static int chunkBuildingBatchSize = 2;
-    public static int chunkBuildingTotalBatches = 4;
+    public static int chunkBuildingBatchSize = 12;
+    public static int chunkBuildingTotalBatches = 12;
+    public static int chunkBuildingThreads = getDefaultChunkBuildingThreads();
+    public static boolean collectChunkEmission = false;
     public static boolean vrEnabled = false;
     public static float vrRenderScale = 0.5f;
     public static float vrIPD = 0.063f;
     public static float vrWorldScale = 1.0f;
+    public static boolean postStereoSimulator = false;
+
+    public static int getMaxChunkBuildingThreads() {
+        int availableProcessors = Runtime.getRuntime().availableProcessors();
+        boolean is64Bits = System.getProperty("os.arch", "").contains("64");
+        return Math.max(1, is64Bits ? availableProcessors : Math.min(availableProcessors, 4));
+    }
+
+    public static int clampChunkBuildingThreads(int chunkBuildingThreads) {
+        return Math.max(1, Math.min(chunkBuildingThreads, getMaxChunkBuildingThreads()));
+    }
+
+    private static int getDefaultChunkBuildingThreads() {
+        return clampChunkBuildingThreads(
+            Math.max(1, (int) (Runtime.getRuntime().availableProcessors() * 0.6)));
+    }
 
     public static void readOptions() {
         Path path = RadianceClient.radianceDir.resolve(OPTION_PROPERTIES);
@@ -90,6 +120,12 @@ public class Options {
             setChunkBuildingTotalBatches(
                 Integer.parseInt(props.getProperty("chunkBuildingTotalBatches",
                     String.valueOf(chunkBuildingTotalBatches))), false);
+            setChunkBuildingThreads(
+                Integer.parseInt(props.getProperty("chunkBuildingThreads",
+                    String.valueOf(chunkBuildingThreads))), false);
+            setCollectChunkEmission(Boolean.parseBoolean(props.getProperty("collectChunkEmission",
+                    String.valueOf(collectChunkEmission))),
+                false);
             setVREnabled(Boolean.parseBoolean(
                 props.getProperty("vrEnabled", String.valueOf(vrEnabled))), false);
             setVRRenderScale(Float.parseFloat(
@@ -98,6 +134,9 @@ public class Options {
                 props.getProperty("vrIPD", String.valueOf(vrIPD))), false);
             setVRWorldScale(Float.parseFloat(
                 props.getProperty("vrWorldScale", String.valueOf(vrWorldScale))), false);
+            setPostStereoSimulator(Boolean.parseBoolean(
+                props.getProperty("postStereoSimulator", String.valueOf(postStereoSimulator))),
+                false);
 
             overwriteConfig();
 //            System.out.println("Successfully read options: " + path);
@@ -119,10 +158,13 @@ public class Options {
         props.setProperty("rayBounces", String.valueOf(rayBounces));
         props.setProperty("chunkBuildingBatchSize", String.valueOf(chunkBuildingBatchSize));
         props.setProperty("chunkBuildingTotalBatches", String.valueOf(chunkBuildingTotalBatches));
+        props.setProperty("chunkBuildingThreads", String.valueOf(chunkBuildingThreads));
+        props.setProperty("collectChunkEmission", String.valueOf(collectChunkEmission));
         props.setProperty("vrEnabled", String.valueOf(vrEnabled));
         props.setProperty("vrRenderScale", String.valueOf(vrRenderScale));
         props.setProperty("vrIPD", String.valueOf(vrIPD));
         props.setProperty("vrWorldScale", String.valueOf(vrWorldScale));
+        props.setProperty("postStereoSimulator", String.valueOf(postStereoSimulator));
 
         try {
             Files.createDirectories(path.getParent());
@@ -190,6 +232,35 @@ public class Options {
         }
     }
 
+    public static void setChunkBuildingThreads(int chunkBuildingThreads, boolean write) {
+        Options.chunkBuildingThreads = clampChunkBuildingThreads(chunkBuildingThreads);
+        if (write) {
+            overwriteConfig();
+        }
+    }
+
+    public native static void nativeSetCollectChunkEmission(boolean collectChunkEmission,
+        boolean write);
+
+    public static void setCollectChunkEmission(boolean collectChunkEmission, boolean write) {
+        boolean changed = Options.collectChunkEmission != collectChunkEmission;
+        Options.collectChunkEmission = collectChunkEmission;
+        nativeSetCollectChunkEmission(collectChunkEmission, write);
+
+        if (changed) {
+            if (collectChunkEmission) {
+                TextureProxy.flushEmissionTiles();
+                ChunkProxy.rebuildAll();
+            } else if (write) {
+                Pipeline.ensureSelectedShaderPackAvailable();
+            }
+        }
+
+        if (write) {
+            overwriteConfig();
+        }
+    }
+
     public static void setVREnabled(boolean enabled, boolean write) {
         Options.vrEnabled = enabled;
         VRProxy.setEnabled(enabled);
@@ -217,6 +288,16 @@ public class Options {
     public static void setVRWorldScale(float worldScale, boolean write) {
         Options.vrWorldScale = worldScale;
         VRProxy.setWorldScale(worldScale);
+        if (write) {
+            overwriteConfig();
+        }
+    }
+
+    public native static void nativeSetPostStereoSimulator(boolean enabled, boolean write);
+
+    public static void setPostStereoSimulator(boolean enabled, boolean write) {
+        Options.postStereoSimulator = enabled;
+        nativeSetPostStereoSimulator(enabled, write);
         if (write) {
             overwriteConfig();
         }

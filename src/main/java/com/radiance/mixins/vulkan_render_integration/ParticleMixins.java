@@ -8,6 +8,8 @@ import org.spongepowered.asm.mixin.Shadow;
 @Mixin(Particle.class)
 public class ParticleMixins implements IParticleExt {
 
+    private String radiance$contentName = null;
+
     @Shadow
     protected double x;
 
@@ -18,17 +20,27 @@ public class ParticleMixins implements IParticleExt {
     protected double z;
 
     @Override
-    public double neoVoxelRT$getX() {
+    public double radiance$getX() {
         return x;
     }
 
     @Override
-    public double neoVoxelRT$getY() {
+    public double radiance$getY() {
         return y;
     }
 
     @Override
-    public double neoVoxelRT$getZ() {
+    public double radiance$getZ() {
         return z;
+    }
+
+    @Override
+    public String radiance$getContentName() {
+        return radiance$contentName;
+    }
+
+    @Override
+    public void radiance$setContentName(String contentName) {
+        radiance$contentName = contentName;
     }
 }

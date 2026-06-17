@@ -38,7 +38,7 @@ public abstract class NativeImageMixins implements INativeImageExt {
 
         if (stream instanceof IdentifierInputStream) {
             Identifier identifier = ((IdentifierInputStream) stream).getResourceId();
-            ((INativeImageExt) (Object) nativeImage).neoVoxelRT$setIdentifier(identifier);
+            ((INativeImageExt) (Object) nativeImage).radiance$setIdentifier(identifier);
             cir.setReturnValue(nativeImage);
         } else {
             cir.setReturnValue(nativeImage);
@@ -46,52 +46,52 @@ public abstract class NativeImageMixins implements INativeImageExt {
     }
 
     @Override
-    public int neoVoxelRT$getTargetID() {
+    public int radiance$getTargetID() {
         return targetID;
     }
 
     @Override
-    public void neoVoxelRT$setTargetID(int id) {
+    public void radiance$setTargetID(int id) {
         this.targetID = id;
     }
 
     @Override
-    public Identifier neoVoxelRT$getIdentifier() {
+    public Identifier radiance$getIdentifier() {
         return identifier;
     }
 
     @Override
-    public void neoVoxelRT$setIdentifier(Identifier id) {
+    public void radiance$setIdentifier(Identifier id) {
         this.identifier = id;
     }
 
     @Override
-    public NativeImage neoVoxelRT$getSpecularNativeImage() {
+    public NativeImage radiance$getSpecularNativeImage() {
         return specularImage;
     }
 
     @Override
-    public void neoVoxelRT$setSpecularNativeImage(NativeImage image) {
+    public void radiance$setSpecularNativeImage(NativeImage image) {
         this.specularImage = image;
     }
 
     @Override
-    public NativeImage neoVoxelRT$getNormalNativeImage() {
+    public NativeImage radiance$getNormalNativeImage() {
         return normalImage;
     }
 
     @Override
-    public void neoVoxelRT$setNormalNativeImage(NativeImage image) {
+    public void radiance$setNormalNativeImage(NativeImage image) {
         this.normalImage = image;
     }
 
     @Override
-    public NativeImage neoVoxelRT$getFlagNativeImage() {
+    public NativeImage radiance$getFlagNativeImage() {
         return flagImage;
     }
 
     @Override
-    public void neoVoxelRT$setFlagNativeImage(NativeImage image) {
+    public void radiance$setFlagNativeImage(NativeImage image) {
         this.flagImage = image;
     }
 }

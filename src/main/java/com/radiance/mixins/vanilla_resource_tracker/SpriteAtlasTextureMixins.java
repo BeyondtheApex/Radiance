@@ -18,6 +18,6 @@ public abstract class SpriteAtlasTextureMixins extends AbstractTextureMixins {
     public void setImageTargetIDBeforeUpload(SpriteLoader.StitchResult stitchResult,
         CallbackInfo ci, @Local Sprite sprite) {
         int id = getGlId();
-        ((ISpriteExt) sprite).neoVoxelRT$setTargetID(id);
+        ((ISpriteExt) sprite).radiance$setTargetID(id);
     }
 }

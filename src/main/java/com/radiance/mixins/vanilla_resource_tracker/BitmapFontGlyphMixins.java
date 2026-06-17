@@ -79,7 +79,7 @@ public abstract class BitmapFontGlyphMixins {
 
             @Override
             public void upload(int id, int u, int v) {
-                ((INativeImageExt) (Object) image).neoVoxelRT$setTargetID(id);
+                ((INativeImageExt) (Object) image).radiance$setTargetID(id);
                 upload(u, v);
             }
 

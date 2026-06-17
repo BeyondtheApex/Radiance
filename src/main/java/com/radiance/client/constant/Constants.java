@@ -222,7 +222,6 @@ public class Constants {
         PLAYER(0b00000010),
         FISHING_BOBBER(0b00000100),
         HAND(0b00001000),
-        WEATHER(0b00010000),
         PARTICLE(0b00100000),
         CLOUD(0b01000000),
         BOAT_WATER_MASK(0b10000000);
@@ -230,6 +229,23 @@ public class Constants {
         private final int value;
 
         RayTracingFlags(int value) {
+            this.value = value;
+        }
+
+        public int getValue() {
+            return value;
+        }
+    }
+
+    public enum PostRenderFlags {
+        WEATHER(0b0001),
+        PARTICLE(0b0010),
+        TEXT(0b0100),
+        NAME_TAG(0b1000);
+
+        private final int value;
+
+        PostRenderFlags(int value) {
             this.value = value;
         }
 

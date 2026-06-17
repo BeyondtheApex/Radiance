@@ -22,7 +22,7 @@ public class ChunkBuilderBuiltChunkMixins implements IChunkBuilderBuiltChunkExt 
     ChunkBuilder field_20833;
 
     @Unique
-    public ChunkBuilder neoVoxelRT$getChunkBuilder() {
+    public ChunkBuilder radiance$getChunkBuilder() {
         return field_20833;
     }
 
@@ -42,6 +42,13 @@ public class ChunkBuilderBuiltChunkMixins implements IChunkBuilderBuiltChunkExt 
     private void addToRebuildGridScheduleRebuild(CallbackInfo ci) {
         ChunkBuilder.BuiltChunk self = (ChunkBuilder.BuiltChunk) (Object) this;
         ChunkProxy.enqueueRebuild(self);
+    }
+
+    @Inject(method = "setSectionPos(J)V", at = @At(value = "TAIL"))
+    private void syncNativeChunkSlot(long sectionPos, CallbackInfo ci) {
+        ChunkBuilder.BuiltChunk self = (ChunkBuilder.BuiltChunk) (Object) this;
+        ChunkProxy.relocateSingle(self.index, self.getOrigin().getX(), self.getOrigin().getY(),
+            self.getOrigin().getZ());
     }
 
     @Inject(method = "delete()V",

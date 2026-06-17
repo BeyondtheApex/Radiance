@@ -51,7 +51,7 @@ public class AbstractTextureMixins implements IAbstractTextureExt {
     }
 
     @Override
-    public int neoVoxelRT$getGlIDUnsafe() {
+    public int radiance$getGlIDUnsafe() {
         if (this.glId < 0) {
             throw new IllegalStateException("glId is not initialized");
         }

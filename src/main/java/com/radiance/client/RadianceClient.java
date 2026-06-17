@@ -58,28 +58,23 @@ public class RadianceClient implements ClientModInitializer {
             Path dllTargetPath = radianceDir.resolve("core.dll");
             Path dllResourcePath = Path.of("core.dll");
             copyFileFromResource(dllTargetPath, dllResourcePath);
+            Path xessPath = radianceDir.resolve("libxess.dll");
+            Path xessDx11Path = radianceDir.resolve("libxess_dx11.dll");
+            Path xessFgPath = radianceDir.resolve("libxess_fg.dll");
+            copyOptionalFileFromResource(xessPath, Path.of("libxess.dll"));
+            // currently not used, can be used later for fg
+            copyOptionalFileFromResource(xessDx11Path, Path.of("libxess_dx11.dll"));
+            copyOptionalFileFromResource(xessFgPath, Path.of("libxess_fg.dll"));
+
+            loadOptionalLibrary(xessPath);
 
             System.load(dllTargetPath.toAbsolutePath().toString());
-
-            Path dlssTargetPath = radianceDir.resolve("nvngx_dlss.dll");
-            Path dlssDTargetPath = radianceDir.resolve("nvngx_dlssd.dll");
-
-            if (!Files.exists(dlssTargetPath) || !Files.exists(dlssDTargetPath)) {
-                throw new RuntimeException("DLSS runtime libraries not found!");
-            }
         } else if (osName.toLowerCase().contains("linux")) {
             Path soTargetPath = radianceDir.resolve("libcore.so");
             Path soResourcePath = Path.of("libcore.so");
             copyFileFromResource(soTargetPath, soResourcePath);
 
             System.load(soTargetPath.toAbsolutePath().toString());
-
-            Path dlssTargetPath = radianceDir.resolve("libnvidia-ngx-dlss.so.310.5.3");
-            Path dlssDTargetPath = radianceDir.resolve("libnvidia-ngx-dlssd.so.310.5.3");
-
-            if (!Files.exists(dlssTargetPath) || !Files.exists(dlssDTargetPath)) {
-                throw new RuntimeException("DLSS runtime libraries not found!");
-            }
         } else {
             throw new RuntimeException("The OS " + osName + " is not supported");
         }
@@ -132,6 +127,25 @@ public class RadianceClient implements ClientModInitializer {
             Files.copy(is, targetPath, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    public void copyOptionalFileFromResource(Path targetPath, Path resourcePath) {
+        try (InputStream is = getClass().getResourceAsStream(toResourcePath(resourcePath))) {
+            if (is == null) {
+                return;
+            }
+
+            Files.createDirectories(targetPath.getParent());
+            Files.copy(is, targetPath, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public void loadOptionalLibrary(Path path) {
+        if (Files.exists(path)) {
+            System.load(path.toAbsolutePath().toString());
         }
     }
 

@@ -2,7 +2,7 @@ package com.radiance.mixin_related.extensions.vanilla_resource_tracker;
 
 public interface ISpriteContentsExt {
 
-    int neoVoxelRT$getTargetID();
+    int radiance$getTargetID();
 
-    void neoVoxelRT$setTargetID(int targetID);
+    void radiance$setTargetID(int targetID);
 }

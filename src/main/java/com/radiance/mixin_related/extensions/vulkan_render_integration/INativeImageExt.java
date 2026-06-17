@@ -4,9 +4,9 @@ import net.minecraft.client.texture.NativeImage;
 
 public interface INativeImageExt {
 
-    void neoVoxelRT$loadFromTextureImageWithoutUI(int level, boolean removeAlpha);
+    void radiance$loadFromTextureImageWithoutUI(int level, boolean removeAlpha);
 
-    NativeImage neoVoxelRT$alignTo(NativeImage template);
+    NativeImage radiance$alignTo(NativeImage template);
 
-    long neoVoxelRT$getPointer();
+    long radiance$getPointer();
 }

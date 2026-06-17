@@ -16,6 +16,6 @@ public abstract class ReloadableTextureMixins extends AbstractTextureMixins {
     public void setTargetIDBeforeUpload(NativeImage image, boolean blur, boolean clamp,
         CallbackInfo ci) {
         int id = getGlId();
-        ((INativeImageExt) (Object) image).neoVoxelRT$setTargetID(id);
+        ((INativeImageExt) (Object) image).radiance$setTargetID(id);
     }
 }

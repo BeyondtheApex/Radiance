@@ -22,6 +22,6 @@ public abstract class OverlayTextureMixins {
     @Inject(method = "<init>()V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/texture/NativeImage;upload(IIIIIIIZ)V"))
     public void setImageTargetIDBeforeUpload(CallbackInfo ci, @Local NativeImage nativeImage) {
         int id = texture.getGlId();
-        ((INativeImageExt) (Object) nativeImage).neoVoxelRT$setTargetID(id);
+        ((INativeImageExt) (Object) nativeImage).radiance$setTargetID(id);
     }
 }

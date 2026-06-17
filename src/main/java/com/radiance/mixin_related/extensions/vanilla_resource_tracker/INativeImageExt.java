@@ -5,23 +5,23 @@ import net.minecraft.util.Identifier;
 
 public interface INativeImageExt {
 
-    int neoVoxelRT$getTargetID();
+    int radiance$getTargetID();
 
-    void neoVoxelRT$setTargetID(int id);
+    void radiance$setTargetID(int id);
 
-    Identifier neoVoxelRT$getIdentifier();
+    Identifier radiance$getIdentifier();
 
-    void neoVoxelRT$setIdentifier(Identifier id);
+    void radiance$setIdentifier(Identifier id);
 
-    NativeImage neoVoxelRT$getSpecularNativeImage();
+    NativeImage radiance$getSpecularNativeImage();
 
-    void neoVoxelRT$setSpecularNativeImage(NativeImage image);
+    void radiance$setSpecularNativeImage(NativeImage image);
 
-    NativeImage neoVoxelRT$getNormalNativeImage();
+    NativeImage radiance$getNormalNativeImage();
 
-    void neoVoxelRT$setNormalNativeImage(NativeImage image);
+    void radiance$setNormalNativeImage(NativeImage image);
 
-    NativeImage neoVoxelRT$getFlagNativeImage();
+    NativeImage radiance$getFlagNativeImage();
 
-    void neoVoxelRT$setFlagNativeImage(NativeImage image);
+    void radiance$setFlagNativeImage(NativeImage image);
 }

@@ -23,7 +23,7 @@ public class DrawContextMixins implements IDrawContextExt {
     private VertexConsumerProvider.Immediate vertexConsumers;
 
     @Override
-    public void neoVoxelRT$drawOrientedQuad(RenderLayer layer, float x1, float y1, float x2,
+    public void radiance$drawOrientedQuad(RenderLayer layer, float x1, float y1, float x2,
         float y2, float thickness, int color) {
         float dx = x2 - x1;
         float dy = y2 - y1;

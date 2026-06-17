@@ -6,7 +6,7 @@ import net.minecraft.client.util.math.MatrixStack;
 
 public interface IHeldItemRendererExt {
 
-    void neoVoxelRT$renderItem(float tickDelta,
+    void radiance$renderItem(float tickDelta,
         MatrixStack matrices,
         VertexConsumerProvider vertexConsumers,
         ClientPlayerEntity player,

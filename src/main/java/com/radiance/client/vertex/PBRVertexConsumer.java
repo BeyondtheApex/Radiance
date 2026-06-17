@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.BuiltBuffer;
 import net.minecraft.client.render.RenderLayer;
+import net.minecraft.client.render.RenderPhase;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexFormat;
 import net.minecraft.client.render.VertexFormatElement;
@@ -40,6 +41,17 @@ import org.lwjgl.system.MemoryUtil;
 public class PBRVertexConsumer implements VertexConsumer {
 
     private static final boolean LITTLE_ENDIAN = ByteOrder.nativeOrder() == ByteOrder.LITTLE_ENDIAN;
+    private static final int ALPHA_MODE_OPAQUE = 0;
+    private static final int ALPHA_MODE_CUTOUT = 1;
+    private static final int ALPHA_MODE_TRANSPARENT = 2;
+    private static final int POST_TEXT_MODE_BACKGROUND = 1;
+    private static final int POST_TEXT_MODE_INTENSITY = 2;
+    private static final int POST_TEXT_MODE_RGBA = 3;
+    private static final int POST_TEXT_MODE_BACKGROUND_SEE_THROUGH = 4;
+    private static final int POST_TEXT_MODE_INTENSITY_SEE_THROUGH = 5;
+    private static final int POST_TEXT_MODE_RGBA_SEE_THROUGH = 6;
+    private static final int POST_TEXT_MODE_INTENSITY_POLYGON_OFFSET = 7;
+    private static final int POST_TEXT_MODE_RGBA_POLYGON_OFFSET = 8;
 
     private final BufferAllocator allocator;
     private final VertexFormat format;
@@ -55,6 +67,7 @@ public class PBRVertexConsumer implements VertexConsumer {
     private int currentMask = 0;
     private boolean building = true;
     private int textureID;
+    private final int alphaMode;
     private float baseX = 0;
     private float baseY = 0;
     private float baseZ = 0;
@@ -93,6 +106,7 @@ public class PBRVertexConsumer implements VertexConsumer {
                     .getTexture(identifier)
                     .getGlId();
         }
+        this.alphaMode = getAlphaMode(renderLayer);
     }
 
     private static void putInt(long ptr, int v) {
@@ -102,6 +116,45 @@ public class PBRVertexConsumer implements VertexConsumer {
             MemoryUtil.memPutShort(ptr, (short) (v & 0xFFFF));
             MemoryUtil.memPutShort(ptr + 2L, (short) ((v >>> 16) & 0xFFFF));
         }
+    }
+
+    private static int getAlphaMode(RenderLayer renderLayer) {
+        if (!(renderLayer instanceof RenderLayer.MultiPhase multiPhase)) {
+            return ALPHA_MODE_OPAQUE;
+        }
+
+        int postTextMode = getPostTextMode(multiPhase.name);
+        if (postTextMode != ALPHA_MODE_OPAQUE) {
+            return postTextMode;
+        }
+
+        if (multiPhase.name.contains("solid")) {
+            return ALPHA_MODE_OPAQUE;
+        }
+
+        if (multiPhase.name.contains("cutout")) {
+            return ALPHA_MODE_CUTOUT;
+        }
+
+        if (RenderPhase.NO_TRANSPARENCY.equals(multiPhase.phases.transparency)) {
+            return ALPHA_MODE_CUTOUT;
+        }
+
+        return ALPHA_MODE_TRANSPARENT;
+    }
+
+    private static int getPostTextMode(String layerName) {
+        return switch (layerName) {
+            case "text_background" -> POST_TEXT_MODE_BACKGROUND;
+            case "text_intensity" -> POST_TEXT_MODE_INTENSITY;
+            case "text" -> POST_TEXT_MODE_RGBA;
+            case "text_background_see_through" -> POST_TEXT_MODE_BACKGROUND_SEE_THROUGH;
+            case "text_intensity_see_through" -> POST_TEXT_MODE_INTENSITY_SEE_THROUGH;
+            case "text_see_through" -> POST_TEXT_MODE_RGBA_SEE_THROUGH;
+            case "text_intensity_polygon_offset" -> POST_TEXT_MODE_INTENSITY_POLYGON_OFFSET;
+            case "text_polygon_offset" -> POST_TEXT_MODE_RGBA_POLYGON_OFFSET;
+            default -> ALPHA_MODE_OPAQUE;
+        };
     }
 
     public VertexFormat getFormat() {
@@ -180,6 +233,8 @@ public class PBRVertexConsumer implements VertexConsumer {
             MemoryUtil.memPutFloat(ptr + offBase, baseX);
             MemoryUtil.memPutFloat(ptr + offBase + 4L, baseY);
             MemoryUtil.memPutFloat(ptr + offBase + 8L, baseZ);
+            // Reuse the trailing padding word after postBase for alpha mode.
+            putInt(ptr + offBase + 12L, this.alphaMode);
         }
 
         return ptr;
@@ -206,6 +261,8 @@ public class PBRVertexConsumer implements VertexConsumer {
             MemoryUtil.memPutFloat(ptr + offBase, baseX);
             MemoryUtil.memPutFloat(ptr + offBase + 4L, baseY);
             MemoryUtil.memPutFloat(ptr + offBase + 8L, baseZ);
+            // Reuse the trailing padding word after postBase for alpha mode.
+            putInt(ptr + offBase + 12L, this.alphaMode);
         }
 
         if (glintTextureID != 0) {

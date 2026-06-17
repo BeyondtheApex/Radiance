@@ -112,12 +112,6 @@ public abstract class SectionBuilderMixins {
                 entry.getValue()
                     .endNullable();
             if (builtBuffer != null) {
-                if (renderLayer2 == RenderLayer.getTranslucent()) {
-                    renderData.translucencySortingData =
-                        builtBuffer.sortQuads(allocatorStorage.get(RenderLayer.getTranslucent()),
-                            vertexSorter);
-                }
-
                 renderData.buffers.put(renderLayer2, builtBuffer);
             }
         }

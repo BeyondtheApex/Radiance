@@ -88,7 +88,7 @@ public class TtfGlyphMixins {
                     height, false);
                 FT_Face fT_Face = field_2336.getInfo();
                 if (nativeImage.makeGlyphBitmapSubpixel(fT_Face, glyphIndex)) {
-                    ((INativeImageExt) (Object) nativeImage).neoVoxelRT$setTargetID(id);
+                    ((INativeImageExt) (Object) nativeImage).radiance$setTargetID(id);
                     nativeImage.upload(0, x, y, 0, 0, width, height, true);
                 } else {
                     nativeImage.close();

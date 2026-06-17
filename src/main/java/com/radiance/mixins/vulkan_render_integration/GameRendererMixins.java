@@ -6,13 +6,15 @@ import com.radiance.client.proxy.vulkan.RendererProxy;
 import com.radiance.client.proxy.world.EntityProxy;
 import com.radiance.mixin_related.extensions.vulkan_render_integration.IGameRendererExt;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.hud.InGameOverlayRenderer;
+import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gl.Framebuffer;
-import net.minecraft.client.gl.ShaderLoader;
-import net.minecraft.client.gl.ShaderProgramKey;
+import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.BufferBuilderStorage;
 import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.GameRenderer;
 import net.minecraft.client.render.LightmapTextureManager;
+import net.minecraft.client.util.BufferAllocator;
 import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.render.WorldRenderer;
 import net.minecraft.client.render.item.HeldItemRenderer;
@@ -20,8 +22,9 @@ import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.util.ObjectAllocator;
 import net.minecraft.client.util.Pool;
 import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.resource.ResourceFactory;
+import com.mojang.blaze3d.systems.ProjectionType;
 import org.joml.Matrix4f;
+import org.joml.Matrix4fStack;
 import org.joml.Matrix4fc;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -34,7 +37,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(GameRenderer.class)
-public class GameRendererMixins implements IGameRendererExt {
+public abstract class GameRendererMixins implements IGameRendererExt {
 
     @Shadow
     @Final
@@ -52,19 +55,17 @@ public class GameRendererMixins implements IGameRendererExt {
     @Shadow
     @Final
     private BufferBuilderStorage buffers;
+    @Shadow
+    @Final
+    private Camera camera;
     @Unique
     private Matrix4f viewMatrix;
 
-    @Redirect(method = "preloadPrograms(Lnet/minecraft/resource/ResourceFactory;)V",
-        at = @At(value = "INVOKE",
-            target =
-                "Lnet/minecraft/client/gl/ShaderLoader;preload(Lnet/minecraft/resource/ResourceFactory;"
-                    +
-                    "[Lnet/minecraft/client/gl/ShaderProgramKey;)V"))
-    public void cancelPreloadShader(ShaderLoader instance, ResourceFactory factory,
-        ShaderProgramKey[] keys) {
+    @Shadow
+    public abstract Matrix4f getBasicProjectionMatrix(float fovDegrees);
 
-    }
+    @Shadow
+    protected abstract float getFov(Camera camera, float tickDelta, boolean changingFov);
 
     @Inject(method = "renderBlur()V", at = @At(value = "HEAD"), cancellable = true)
     public void redirectRenderBlur(CallbackInfo ci) {
@@ -132,7 +133,13 @@ public class GameRendererMixins implements IGameRendererExt {
     @Inject(method = "renderHand(Lnet/minecraft/client/render/Camera;FLorg/joml/Matrix4f;)V", at = @At(value = "HEAD"), cancellable = true)
     public void redirectRenderHand(Camera camera, float tickDelta, Matrix4f matrix4f,
         CallbackInfo ci) {
-        EntityProxy.queueHandRebuild(buffers, tickDelta, firstPersonRenderer);
+        float worldFov = this.getFov(camera, tickDelta, true);
+        float handFov = this.getFov(camera, tickDelta, false);
+        float handProjectionScale =
+            (float) (Math.tan(Math.toRadians(worldFov * 0.5F)) /
+                Math.tan(Math.toRadians(handFov * 0.5F)));
+        EntityProxy.queueHandRebuild(buffers, tickDelta, firstPersonRenderer,
+            handProjectionScale);
         ci.cancel();
     }
 
@@ -149,8 +156,34 @@ public class GameRendererMixins implements IGameRendererExt {
                 && client.world != null);
     }
 
+    @Inject(method = "render(Lnet/minecraft/client/render/RenderTickCounter;Z)V",
+        at = @At(value = "INVOKE",
+            target =
+                "Lnet/minecraft/client/gui/hud/InGameHud;render(Lnet/minecraft/client/gui/DrawContext;"
+                    + "Lnet/minecraft/client/render/RenderTickCounter;)V"))
+    public void renderFirstPersonOverlaysWithGuiProjection(RenderTickCounter tickCounter,
+        boolean tick, CallbackInfo ci, @Local DrawContext drawContext) {
+        float tickDelta = tickCounter.getTickDelta(true);
+        com.mojang.blaze3d.systems.RenderSystem.backupProjectionMatrix();
+        com.mojang.blaze3d.systems.RenderSystem.setProjectionMatrix(
+            this.getBasicProjectionMatrix(this.getFov(this.camera, tickDelta, false)),
+            ProjectionType.PERSPECTIVE);
+        Matrix4fStack modelViewStack = com.mojang.blaze3d.systems.RenderSystem.getModelViewStack();
+        modelViewStack.pushMatrix();
+        modelViewStack.identity();
+        VertexConsumerProvider.Immediate immediate = VertexConsumerProvider.immediate(
+            new BufferAllocator(1536));
+        try {
+            InGameOverlayRenderer.renderOverlays(this.client, new MatrixStack(), immediate);
+            immediate.draw();
+        } finally {
+            modelViewStack.popMatrix();
+            com.mojang.blaze3d.systems.RenderSystem.restoreProjectionMatrix();
+        }
+    }
+
     @Override
-    public Matrix4f neoVoxelRT$getRotationMatrix() {
+    public Matrix4f radiance$getRotationMatrix() {
         return viewMatrix;
     }
 

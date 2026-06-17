@@ -31,6 +31,6 @@ public class FontStorageMixins {
                     "Lnet/minecraft/client/font/BakedGlyph;"))
     public BakedGlyph redirectBakeToOneWithID(GlyphAtlasTexture instance, RenderableGlyph glyph) {
         IRenderableGlyphExt renderableGlyphExt = (IRenderableGlyphExt) glyph;
-        return ((IGlyphAtlasTextureExt) instance).neoVoxelRT$bake(renderableGlyphExt);
+        return ((IGlyphAtlasTextureExt) instance).radiance$bake(renderableGlyphExt);
     }
 }

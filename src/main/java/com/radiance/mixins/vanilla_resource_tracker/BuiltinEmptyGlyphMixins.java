@@ -49,7 +49,7 @@ public abstract class BuiltinEmptyGlyphMixins {
 
             @Override
             public void upload(int id, int x, int y) {
-                ((INativeImageExt) (Object) image).neoVoxelRT$setTargetID(id);
+                ((INativeImageExt) (Object) image).radiance$setTargetID(id);
                 upload(x, y);
             }
 

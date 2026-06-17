@@ -20,7 +20,7 @@ loom {
 }
 
 tasks.named("runClient", JavaExec) {
-    args "--width", "1920", "--height", "1080"
+   args "--width", "1920", "--height", "1080"
 }
 
 repositories {

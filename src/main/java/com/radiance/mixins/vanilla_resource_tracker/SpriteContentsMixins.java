@@ -18,12 +18,12 @@ public class SpriteContentsMixins implements ISpriteContentsExt {
     private int targetID;
 
     @Override
-    public int neoVoxelRT$getTargetID() {
+    public int radiance$getTargetID() {
         return targetID;
     }
 
     @Override
-    public void neoVoxelRT$setTargetID(int targetID) {
+    public void radiance$setTargetID(int targetID) {
         this.targetID = targetID;
     }
 
@@ -36,6 +36,6 @@ public class SpriteContentsMixins implements ISpriteContentsExt {
         NativeImage[] images,
         CallbackInfo ci,
         @Local(index = 6) int i) {
-        ((INativeImageExt) (Object) images[i]).neoVoxelRT$setTargetID(this.targetID);
+        ((INativeImageExt) (Object) images[i]).radiance$setTargetID(this.targetID);
     }
 }

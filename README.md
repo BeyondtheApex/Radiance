@@ -1,3 +1,50 @@
+<p align="center">
+  <img src="./.assets/logo.png" alt="Radiance Logo" width="200">
+</p>
+
+<h1 align="center">
+  Radiance
+  <br>
+
+  <a href="https://github.com/Minecraft-Radiance/Radiance">
+    <img src="https://img.shields.io/github/stars/Minecraft-Radiance/Radiance?style=flat&logo=github" alt="GitHub Stars">
+  </a>
+
+  <a href="https://discord.gg/y4Uzf6acqk">
+    <img src="https://img.shields.io/badge/Discord-Join-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord">
+  </a>
+
+  <a href="https://modrinth.com/mod/radiance-mod-windows">
+    <img src="https://img.shields.io/badge/Modrinth-Windows-5CA424?style=flat&logo=modrinth&logoColor=white" alt="Modrinth Windows">
+  </a>
+
+  <a href="https://modrinth.com/mod/radiance-mod-linux">
+    <img src="https://img.shields.io/badge/Modrinth-Linux-5CA424?style=flat&logo=modrinth&logoColor=white" alt="Modrinth Linux">
+  </a>
+
+  <a href="https://www.curseforge.com/minecraft/mc-mods/radiance">
+  <img src="https://img.shields.io/badge/CurseForge-Download-F16436?style=flat&logo=curseforge&logoColor=white" alt="CurseForge">
+  </a>
+
+  <a href="https://github.com/Minecraft-Radiance/Radiance/blob/main/LICENCE">
+    <img src="https://img.shields.io/github/license/Minecraft-Radiance/Radiance?style=flat" alt="License">
+  </a>
+
+  <a href="https://github.com/Minecraft-Radiance/Radiance/releases">
+    <img src="https://img.shields.io/github/v/release/Minecraft-Radiance/Radiance?include_prereleases&label=Release&style=flat&logo=github&v=1" alt="GitHub Release">
+  </a>
+
+  <a href="https://www.youtube.com/@RadianceMod">
+    <img src="https://img.shields.io/badge/YouTube-Subscribe-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube">
+  </a>
+
+  <a href="https://b23.tv/bN7CTv1">
+    <img src="https://img.shields.io/badge/Bilibili-Follow-00A1D6?style=flat&logo=bilibili&logoColor=white" alt="Bilibili">
+  </a>
+
+  <br><br>
+</h1>
+
 | English | [简体中文](https://github.com/Minecraft-Radiance/Radiance/blob/main/README-CN.md) |
 
 > This is the Java part of the Radiance mod. For C++ part, please refer to [Minecraft Vulkan Renderer (MCVR)](https://github.com/Minecraft-Radiance/MCVR)
@@ -9,17 +56,13 @@ Due to the variety of C++ usage in the modern industrial rendering pipeline, a s
 
 [Showcase Video (Youtube)](https://www.youtube.com/watch?v=jGIQffPM1Wg)
 
-<img width="2560" height="1440" alt="" src="https://image.puxuan.cc/PicGo/2026-02-09_00.45.30.png" />
+<img src="https://image.puxuan.cc/PicGo/corridor.png"/>
 
-# (Important) PBR Texture Packs
+# PBR Texture Packs
 
-Currently, to enable PBR texture packs, small adaption is necessary to allow miltiplexing. This maybe simpilfied in further versions.
+Starting from 0.1.4, no pre-processing  is necessary. Load directly!
 
-1. Unzip the texture pack
-2. Go into the unziped folder, move `assets/minecraft/textures/**/*_s.png` to `assets/minecraft/textures/specular/**/*_s.png` and `assets/minecraft/textures/**/*_n.png` to `assets/minecraft/textures/normal/**/*_n.png`. The fact behind is that Radiance will create seperate texture atlases for specular and normal textures. This disables vanilla minecraft to read them (4x memory save).
-3. Zip the folder
-
-A sample `python` script can be found [here](https://gist.github.com/Ljiong201108/e5a2fe8f8ac63f3cc70bf5557a948377).
+Although there are already internal emission textures, it is still recommended to use a PBR texture pack for better experience.
 
 # Installation Guide
 
@@ -90,11 +133,8 @@ Finally, build with `./gradlew build`.
 # TODO List
 
 - [ ] port to more versions and mod loaders (WIP, first priority)
-
+- [x] XESS support
 - [ ] Frame Generation
-
-- [ ] XESS support
-
 - [ ] HDR
 
 And more...
@@ -106,6 +146,8 @@ This project uses Vulkan technology. Please refer to [this page](https://www.vul
 This project uses Nvidia's DLSS (Deep Learning Super Sampling) technology. Please refer to [this page](https://www.nvidia.com/en-us/geforce/technologies/dlss/) and [this page](https://github.com/NVIDIA/DLSS) for more information. 
 
 This project uses FSR3. Please refer to [this page](https://gpuopen.com/fidelityfx-super-resolution-3/) for more information.
+
+This project uses XeSS SR. Please refer to [this page](https://www.intel.com/content/www/us/en/developer/articles/technical/xess-sr-developer-guide.html) for more information.
 
 Special thanks to all contributors of open-source libraries used in this project, including [NRD](https://github.com/NVIDIA-RTX/NRD), [GLFW](https://github.com/glfw/glfw), [GLM](https://github.com/icaven/glm), [STB Image](https://github.com/nothings/stb) and [VMA](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator). If any are not credited and should be, please inform the author and credit will be applied where required.
 

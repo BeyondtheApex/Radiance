@@ -48,7 +48,7 @@ public abstract class HeldItemRendererMixins implements IHeldItemRendererExt {
         int light);
 
     @Override
-    public void neoVoxelRT$renderItem(float tickDelta,
+    public void radiance$renderItem(float tickDelta,
         MatrixStack matrices,
         VertexConsumerProvider vertexConsumers,
         ClientPlayerEntity player,

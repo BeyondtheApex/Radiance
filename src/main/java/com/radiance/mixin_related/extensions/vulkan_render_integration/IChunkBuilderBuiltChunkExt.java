@@ -4,5 +4,5 @@ import net.minecraft.client.render.chunk.ChunkBuilder;
 
 public interface IChunkBuilderBuiltChunkExt {
 
-    ChunkBuilder neoVoxelRT$getChunkBuilder();
+    ChunkBuilder radiance$getChunkBuilder();
 }

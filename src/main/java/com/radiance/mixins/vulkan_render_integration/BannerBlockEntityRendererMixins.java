@@ -10,7 +10,10 @@ import net.minecraft.client.util.SpriteIdentifier;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.component.type.BannerPatternsComponent;
 import net.minecraft.util.DyeColor;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.At.Shift;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -19,6 +22,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(BannerBlockEntityRenderer.class)
 public class BannerBlockEntityRendererMixins {
+
+    @Unique
+    private static final float radiance$layerDepthStep = 0.002F;
 
     @Redirect(method = "renderCanvas(Lnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;IILnet/minecraft/client/model/ModelPart;Lnet/minecraft/client/util/SpriteIdentifier;ZLnet/minecraft/util/DyeColor;Lnet/minecraft/component/type/BannerPatternsComponent;ZZ)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/model/ModelPart;render(Lnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumer;II)V"))
     private static void cancelSolidRender(ModelPart canvas, MatrixStack matrices,
@@ -41,10 +47,7 @@ public class BannerBlockEntityRendererMixins {
         int light, int overlay, ModelPart canvas, SpriteIdentifier baseSprite, boolean isBanner,
         DyeColor color, BannerPatternsComponent patterns, boolean glint, boolean solid,
         CallbackInfo ci) {
-        matrices.push();
-        if (!isBanner) {
-            matrices.translate(0.0f, 0.0f, -0.001f);
-        }
+        radiance$pushCanvasLayer(matrices, canvas, 1);
     }
 
     @Inject(method = "renderCanvas(Lnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;IILnet/minecraft/client/model/ModelPart;Lnet/minecraft/client/util/SpriteIdentifier;ZLnet/minecraft/util/DyeColor;Lnet/minecraft/component/type/BannerPatternsComponent;ZZ)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/render/block/entity/BannerBlockEntityRenderer;renderLayer(Lnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;IILnet/minecraft/client/model/ModelPart;Lnet/minecraft/client/util/SpriteIdentifier;Lnet/minecraft/util/DyeColor;)V", ordinal = 0, shift = Shift.AFTER))
@@ -53,7 +56,7 @@ public class BannerBlockEntityRendererMixins {
         int light, int overlay, ModelPart canvas, SpriteIdentifier baseSprite, boolean isBanner,
         DyeColor color, BannerPatternsComponent patterns, boolean glint, boolean solid,
         CallbackInfo ci) {
-        matrices.pop();
+        radiance$popCanvasLayer(matrices, canvas);
     }
 
     @Inject(method = "renderCanvas(Lnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;IILnet/minecraft/client/model/ModelPart;Lnet/minecraft/client/util/SpriteIdentifier;ZLnet/minecraft/util/DyeColor;Lnet/minecraft/component/type/BannerPatternsComponent;ZZ)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/render/block/entity/BannerBlockEntityRenderer;renderLayer(Lnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;IILnet/minecraft/client/model/ModelPart;Lnet/minecraft/client/util/SpriteIdentifier;Lnet/minecraft/util/DyeColor;)V", ordinal = 1))
@@ -62,11 +65,7 @@ public class BannerBlockEntityRendererMixins {
         int light, int overlay, ModelPart canvas, SpriteIdentifier baseSprite, boolean isBanner,
         DyeColor color, BannerPatternsComponent patterns, boolean glint, boolean solid,
         CallbackInfo ci, @Local(ordinal = 2) int i) {
-        matrices.push();
-        if (!isBanner) {
-            matrices.translate(0.0f, 0.0f, -0.001f);
-        }
-        matrices.scale(1.001f, 1.001f, 1.0f + 0.001f * (i + 1));
+        radiance$pushCanvasLayer(matrices, canvas, i + 2);
     }
 
     @Inject(method = "renderCanvas(Lnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;IILnet/minecraft/client/model/ModelPart;Lnet/minecraft/client/util/SpriteIdentifier;ZLnet/minecraft/util/DyeColor;Lnet/minecraft/component/type/BannerPatternsComponent;ZZ)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/render/block/entity/BannerBlockEntityRenderer;renderLayer(Lnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/VertexConsumerProvider;IILnet/minecraft/client/model/ModelPart;Lnet/minecraft/client/util/SpriteIdentifier;Lnet/minecraft/util/DyeColor;)V", ordinal = 1, shift = Shift.AFTER))
@@ -75,6 +74,21 @@ public class BannerBlockEntityRendererMixins {
         int light, int overlay, ModelPart canvas, SpriteIdentifier baseSprite, boolean isBanner,
         DyeColor color, BannerPatternsComponent patterns, boolean glint, boolean solid,
         CallbackInfo ci) {
+        radiance$popCanvasLayer(matrices, canvas);
+    }
+
+    @Unique
+    private static void radiance$pushCanvasLayer(MatrixStack matrices, ModelPart canvas,
+        int depthIndex) {
+        matrices.push();
+        Vector3f offset = new Vector3f(0.0F, 0.0F, -radiance$layerDepthStep * depthIndex);
+        new Quaternionf().rotationZYX(canvas.roll, canvas.yaw, canvas.pitch)
+            .transform(offset);
+        matrices.translate(offset.x, offset.y, offset.z);
+    }
+
+    @Unique
+    private static void radiance$popCanvasLayer(MatrixStack matrices, ModelPart canvas) {
         matrices.pop();
     }
 }

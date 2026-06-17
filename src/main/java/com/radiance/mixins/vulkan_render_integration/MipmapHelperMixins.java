@@ -17,7 +17,7 @@ public class MipmapHelperMixins {
         CallbackInfoReturnable<NativeImage[]> cir, @Local(ordinal = 0) NativeImage nativeImage,
         @Local(ordinal = 1) NativeImage nativeImage2) {
 
-        ((INativeImageExt) (Object) nativeImage2).neoVoxelRT$setIdentifier(
-            ((INativeImageExt) (Object) nativeImage).neoVoxelRT$getIdentifier());
+        ((INativeImageExt) (Object) nativeImage2).radiance$setIdentifier(
+            ((INativeImageExt) (Object) nativeImage).radiance$getIdentifier());
     }
 }

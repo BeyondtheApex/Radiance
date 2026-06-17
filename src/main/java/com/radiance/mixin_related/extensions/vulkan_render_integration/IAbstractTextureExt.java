@@ -2,5 +2,5 @@ package com.radiance.mixin_related.extensions.vulkan_render_integration;
 
 public interface IAbstractTextureExt {
 
-    int neoVoxelRT$getGlIDUnsafe();
+    int radiance$getGlIDUnsafe();
 }

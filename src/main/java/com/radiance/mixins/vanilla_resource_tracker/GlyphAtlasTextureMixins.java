@@ -24,7 +24,7 @@ public abstract class GlyphAtlasTextureMixins extends AbstractTextureMixins impl
     private GlyphAtlasTexture.Slot rootSlot;
 
     @Override
-    public BakedGlyph neoVoxelRT$bake(IRenderableGlyphExt glyph) {
+    public BakedGlyph radiance$bake(IRenderableGlyphExt glyph) {
         if (glyph.hasColor() != this.hasColor) {
             return null;
         }

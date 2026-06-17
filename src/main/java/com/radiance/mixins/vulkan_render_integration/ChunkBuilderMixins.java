@@ -24,17 +24,17 @@ public class ChunkBuilderMixins implements IChunkBuilderExt {
     ClientWorld world;
 
     @Override
-    public SectionBuilder neoVoxelRT$getSectionBuilder() {
+    public SectionBuilder radiance$getSectionBuilder() {
         return sectionBuilder;
     }
 
     @Override
-    public ClientWorld neoVoxelRT$getWorld() {
+    public ClientWorld radiance$getWorld() {
         return world;
     }
 
     @Override
-    public BlockBufferAllocatorStorage neoVoxelRT$getBuffers() {
+    public BlockBufferAllocatorStorage radiance$getBuffers() {
         return buffers;
     }
 }

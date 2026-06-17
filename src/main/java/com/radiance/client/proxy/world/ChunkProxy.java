@@ -1,11 +1,11 @@
 package com.radiance.client.proxy.world;
 
 import static net.minecraft.client.render.VertexFormat.DrawMode.QUADS;
-import static org.lwjgl.system.MemoryStack.stackPush;
 import static org.lwjgl.system.MemoryUtil.memAddress;
 
 import com.mojang.blaze3d.systems.VertexSorter;
 import com.radiance.client.constant.Constants;
+import com.radiance.client.option.Options;
 import com.radiance.client.proxy.vulkan.BufferProxy;
 import com.radiance.mixin_related.extensions.vulkan_render_integration.IChunkBuilderBuiltChunkExt;
 import com.radiance.mixin_related.extensions.vulkan_render_integration.IChunkBuilderExt;
@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.BuiltBuffer;
+import net.minecraft.client.render.BuiltChunkStorage;
 import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.chunk.BlockBufferAllocatorStorage;
@@ -35,7 +36,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkSectionPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
-import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
 
 public class ChunkProxy {
 
@@ -52,9 +53,14 @@ public class ChunkProxy {
         }
     };
     private static final Map<Integer, ChunkBuilder.BuiltChunk> rebuildQueue = new ConcurrentHashMap<>();
+    private static final java.util.Set<Integer> forcedRebuildIndices = ConcurrentHashMap.newKeySet();
     private static final List<Future<?>> rebuildTasks = new ArrayList<>();
-    private static final int numNormalChunkRebuildThreads = 1;
+    private static BuiltChunkStorage currentStorage = null;
+    private static boolean pendingRebuildAll = false;
+    private static int numChunkRebuildThreads = getChunkRebuildThreadCount();
     private static final int numImportantChunkRebuildThreads = 1;
+    private static int numNormalChunkRebuildThreads = Math.max(1,
+        numChunkRebuildThreads - numImportantChunkRebuildThreads);
     private static final ExecutorService
         importantChunkRebuildExecutor =
         Executors.newFixedThreadPool(numImportantChunkRebuildThreads, r -> {
@@ -73,11 +79,40 @@ public class ChunkProxy {
             return thread;
         });
 
-    public static native void initNative(int numChunks);
+    public static native void initNative(int numChunks, int sizeX, int sizeY, int sizeZ,
+        int bottomSectionCoord);
 
-    public static void init(int numChunks) {
+    public static native void updateSectionPosNative(int sectionX, int sectionY, int sectionZ);
+
+    public static void init(int numChunks, int sizeX, int sizeY, int sizeZ,
+        int bottomSectionCoord) {
         clear();
-        initNative(numChunks);
+        initNative(numChunks, sizeX, sizeY, sizeZ, bottomSectionCoord);
+    }
+
+    public static void updateSectionPos(ChunkSectionPos sectionPos) {
+        updateSectionPosNative(sectionPos.getSectionX(), sectionPos.getSectionY(),
+            sectionPos.getSectionZ());
+    }
+
+    public static void setStorage(BuiltChunkStorage storage) {
+        currentStorage = storage;
+        if (currentStorage != null && pendingRebuildAll) {
+            pendingRebuildAll = false;
+            queueRebuildAll(currentStorage);
+        }
+    }
+
+    private static int getChunkRebuildThreadCount() {
+        int expectedBufferTotal = RenderLayer.getBlockLayers()
+            .stream()
+            .mapToInt(RenderLayer::getExpectedBufferSize)
+            .sum();
+        int memoryLimited = Math.max(1,
+            (int) (Runtime.getRuntime().maxMemory() * 0.3) / (expectedBufferTotal * 4) - 1);
+        int userThreads = Options.chunkBuildingThreads;
+        return Math.max(2,
+            Math.min(userThreads, Math.min(Options.getMaxChunkBuildingThreads(), memoryLimited)));
     }
 
     public static AutoCloseable scopedBlockBufferAllocatorStorage() {
@@ -95,6 +130,9 @@ public class ChunkProxy {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
+        numChunkRebuildThreads = getChunkRebuildThreadCount();
+        numNormalChunkRebuildThreads = Math.max(1,
+            numChunkRebuildThreads - numImportantChunkRebuildThreads);
         backgroundChunkRebuildExecutor = Executors.newFixedThreadPool(numNormalChunkRebuildThreads,
             r -> {
                 Thread thread = new Thread(r);
@@ -103,18 +141,47 @@ public class ChunkProxy {
             });
 
         rebuildQueue.clear();
+        forcedRebuildIndices.clear();
         rebuildTasks.clear();
+        currentStorage = null;
+        pendingRebuildAll = false;
     }
 
     public static void enqueueRebuild(ChunkBuilder.BuiltChunk chunk) {
         rebuildQueue.put(chunk.index, chunk);
     }
 
+    public static void rebuildAll() {
+        if (currentStorage == null || currentStorage.chunks == null) {
+            pendingRebuildAll = true;
+            return;
+        }
+
+        queueRebuildAll(currentStorage);
+    }
+
+    private static void queueRebuildAll(BuiltChunkStorage storage) {
+        if (storage == null || storage.chunks == null) {
+            pendingRebuildAll = true;
+            return;
+        }
+
+        for (ChunkBuilder.BuiltChunk builtChunk : storage.chunks) {
+            if (builtChunk == null) {
+                continue;
+            }
+            forcedRebuildIndices.add(builtChunk.index);
+            builtChunk.scheduleRebuild(true);
+            enqueueRebuild(builtChunk);
+        }
+    }
+
     public static void rebuild(Camera camera) {
 
         BlockPos blockPos = camera.getBlockPos();
         for (ChunkBuilder.BuiltChunk builtChunk : rebuildQueue.values()) {
-            if (builtChunk.needsRebuild() && builtChunk.shouldBuild()) {
+            boolean forced = forcedRebuildIndices.remove(builtChunk.index);
+            if (builtChunk.needsRebuild() && (forced || builtChunk.shouldBuild())) {
                 builtChunk.cancelRebuild();
 
                 BlockPos
@@ -160,11 +227,11 @@ public class ChunkProxy {
         try (var scope = scopedBlockBufferAllocatorStorage()) {
             ChunkRendererRegionBuilder chunkRendererRegionBuilder = new ChunkRendererRegionBuilder();
             IChunkBuilderBuiltChunkExt builtChunkExt = (IChunkBuilderBuiltChunkExt) builtChunk;
-            ChunkBuilder chunkBuilder = builtChunkExt.neoVoxelRT$getChunkBuilder();
+            ChunkBuilder chunkBuilder = builtChunkExt.radiance$getChunkBuilder();
             IChunkBuilderExt chunkBuilderExt = (IChunkBuilderExt) chunkBuilder;
             ChunkRendererRegion
                 chunkRendererRegion =
-                chunkRendererRegionBuilder.build(chunkBuilderExt.neoVoxelRT$getWorld(),
+                chunkRendererRegionBuilder.build(chunkBuilderExt.radiance$getWorld(),
                     ChunkSectionPos.from(builtChunk.getSectionPos()));
 
             if (chunkRendererRegion == null) {
@@ -201,12 +268,9 @@ public class ChunkProxy {
                 (float) (vec3d.z - builtChunk.getOrigin()
                     .getZ()));
 
-        SectionBuilder.RenderData renderData;
-        synchronized (ChunkBuilder.class) {
-            renderData =
-                ((IChunkBuilderExt) chunkBuilder).neoVoxelRT$getSectionBuilder()
-                    .build(chunkSectionPos, chunkRendererRegion, vertexSorter, storage);
-        }
+        SectionBuilder.RenderData renderData =
+            ((IChunkBuilderExt) chunkBuilder).radiance$getSectionBuilder()
+                .build(chunkSectionPos, chunkRendererRegion, vertexSorter, storage);
 
         Map<RenderLayer, BuiltBuffer> buffers = renderData.buffers;
         builtChunk.setNoCullingBlockEntities(renderData.noCullingBlockEntities);
@@ -246,35 +310,48 @@ public class ChunkProxy {
 
                 @Override
                 public boolean isEmpty(RenderLayer layer) {
-                    return false;
+                    return layer == null || !buffers.containsKey(layer);
                 }
             };
             builtChunk.data.set(chunkData);
             builtChunkNum++;
 
-            try (MemoryStack stack = stackPush()) {
+            ByteBuffer geometryTypeBB = null;
+            ByteBuffer geometryGroupNameBB = null;
+            ByteBuffer geometryTextureBB = null;
+            ByteBuffer vertexFormatBB = null;
+            ByteBuffer vertexCountBB = null;
+            ByteBuffer verticesBB = null;
+            List<ByteBuffer> geometryGroupNameBuffers = new ArrayList<>(buffers.size());
+
+            try {
                 int geometryTypeSize = buffers.size() * Integer.BYTES;
-                ByteBuffer geometryTypeBB = stack.malloc(geometryTypeSize);
+                geometryTypeBB = MemoryUtil.memAlloc(geometryTypeSize);
                 long geometryTypeAddr = memAddress(geometryTypeBB);
                 int geometryTypeBaseAddr = 0;
 
+                int geometryGroupNameSize = buffers.size() * Long.BYTES;
+                geometryGroupNameBB = MemoryUtil.memAlloc(geometryGroupNameSize);
+                long geometryGroupNameAddr = memAddress(geometryGroupNameBB);
+                int geometryGroupNameBaseAddr = 0;
+
                 int geometryTextureSize = buffers.size() * Integer.BYTES;
-                ByteBuffer geometryTextureBB = stack.malloc(geometryTextureSize);
+                geometryTextureBB = MemoryUtil.memAlloc(geometryTextureSize);
                 long geometryTextureAddr = memAddress(geometryTextureBB);
                 int geometryTextureBaseAddr = 0;
 
                 int vertexFormatSize = buffers.size() * Integer.BYTES;
-                ByteBuffer vertexFormatBB = stack.malloc(vertexFormatSize);
+                vertexFormatBB = MemoryUtil.memAlloc(vertexFormatSize);
                 long vertexFormatAddr = memAddress(vertexFormatBB);
                 int vertexFormatBaseAddr = 0;
 
                 int vertexCountSize = buffers.size() * Integer.BYTES;
-                ByteBuffer vertexCountBB = stack.malloc(vertexCountSize);
+                vertexCountBB = MemoryUtil.memAlloc(vertexCountSize);
                 long vertexCountAddr = memAddress(vertexCountBB);
                 int vertexCountBaseAddr = 0;
 
                 int verticesSize = buffers.size() * Long.BYTES;
-                ByteBuffer verticesBB = stack.malloc(verticesSize);
+                verticesBB = MemoryUtil.memAlloc(verticesSize);
                 long verticesAddr = memAddress(verticesBB);
                 int verticesBaseAddr = 0;
 
@@ -311,6 +388,12 @@ public class ChunkProxy {
                     geometryTypeBB.putInt(geometryTypeBaseAddr, geometryTypeID);
                     geometryTypeBaseAddr += Integer.BYTES;
 
+                    ByteBuffer geometryGroupNameBuffer = MemoryUtil.memUTF8(renderLayer.name, true);
+                    geometryGroupNameBuffers.add(geometryGroupNameBuffer);
+                    geometryGroupNameBB.putLong(geometryGroupNameBaseAddr,
+                        memAddress(geometryGroupNameBuffer));
+                    geometryGroupNameBaseAddr += Long.BYTES;
+
                     geometryTextureBB.putInt(geometryTextureBaseAddr, geometryTextureID);
                     geometryTextureBaseAddr += Integer.BYTES;
 
@@ -335,11 +418,34 @@ public class ChunkProxy {
                     builtChunk.index,
                     buffers.size(),
                     geometryTypeAddr,
+                    geometryGroupNameAddr,
                     geometryTextureAddr,
                     vertexFormatAddr,
                     vertexCountAddr,
                     verticesAddr,
                     important);
+            } finally {
+                if (geometryTypeBB != null) {
+                    MemoryUtil.memFree(geometryTypeBB);
+                }
+                if (geometryGroupNameBB != null) {
+                    MemoryUtil.memFree(geometryGroupNameBB);
+                }
+                if (geometryTextureBB != null) {
+                    MemoryUtil.memFree(geometryTextureBB);
+                }
+                if (vertexFormatBB != null) {
+                    MemoryUtil.memFree(vertexFormatBB);
+                }
+                if (vertexCountBB != null) {
+                    MemoryUtil.memFree(vertexCountBB);
+                }
+                if (verticesBB != null) {
+                    MemoryUtil.memFree(verticesBB);
+                }
+                for (ByteBuffer geometryGroupNameBuffer : geometryGroupNameBuffers) {
+                    MemoryUtil.memFree(geometryGroupNameBuffer);
+                }
             }
         }
 
@@ -355,6 +461,7 @@ public class ChunkProxy {
         long index,
         int size,
         long geometryTypes,
+        long geometryGroupNames,
         long geometryTextures,
         long vertexFormats,
         long vertexCounts,
@@ -366,6 +473,8 @@ public class ChunkProxy {
     public static boolean isChunkReady(ChunkBuilder.BuiltChunk builtChunk) {
         return isChunkReady(builtChunk.index);
     }
+
+    public static native void relocateSingle(long index, int originX, int originY, int originZ);
 
     public static native void invalidateSingle(long index);
 }

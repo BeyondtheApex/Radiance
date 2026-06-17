@@ -8,7 +8,7 @@ import net.minecraft.client.particle.ParticleTextureSheet;
 
 public interface IParticleManagerExt {
 
-    List<ParticleTextureSheet> neoVoxelRT$getTextureSheets();
+    List<ParticleTextureSheet> radiance$getTextureSheets();
 
-    Map<ParticleTextureSheet, Queue<Particle>> neoVoxelRT$getParticles();
+    Map<ParticleTextureSheet, Queue<Particle>> radiance$getParticles();
 }

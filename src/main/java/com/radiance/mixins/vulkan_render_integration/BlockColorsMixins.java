@@ -38,7 +38,7 @@ public class BlockColorsMixins implements IBlockColorsExt {
 //    }
 
     @Override
-    public float neoVoxelRT$getEmission(BlockState state, @Nullable BlockRenderView world,
+    public float radiance$getEmission(BlockState state, @Nullable BlockRenderView world,
         @Nullable BlockPos pos, int tintIndex) {
         BlockColorProvider blockColorProvider = this.providers.get(
             Registries.BLOCK.getRawId(state.getBlock()));

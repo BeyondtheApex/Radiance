@@ -6,7 +6,7 @@ import net.minecraft.util.math.ColorHelper;
 
 public class MipmapUtil {
 
-    private static final int MIN_ALPHA = 96;
+    private static final float CUTOUT_ALPHA_COVERAGE_THRESHOLD = 0.5F;
     private static final float[] COLOR_FRACTIONS = Util.make(new float[256], list -> {
         for (int i = 0; i < list.length; i++) {
             list[i] = (float) Math.pow(i / 255.0F, 2.2);
@@ -43,13 +43,10 @@ public class MipmapUtil {
 
             for (int x = 0; x < newWidth; x++) {
                 for (int y = 0; y < newHeight; y++) {
-                    nextLevel.setColorArgb(x,
-                        y,
-                        blend(currentSource.getColorArgb(x * 2, y * 2),
-                            currentSource.getColorArgb(x * 2 + 1, y * 2),
-                            currentSource.getColorArgb(x * 2, y * 2 + 1),
-                            currentSource.getColorArgb(x * 2 + 1, y * 2 + 1),
-                            bl));
+                    nextLevel.setColorArgb(x, y, blend(currentSource.getColorArgb(x * 2, y * 2),
+                        currentSource.getColorArgb(x * 2 + 1, y * 2),
+                        currentSource.getColorArgb(x * 2, y * 2 + 1),
+                        currentSource.getColorArgb(x * 2 + 1, y * 2 + 1), bl));
                 }
             }
 
@@ -62,6 +59,40 @@ public class MipmapUtil {
         }
 
         return currentSource;
+    }
+
+    public static NativeImage[] buildMipmapChain(NativeImage original) {
+        int maxLevel = 0;
+        int width = original.getWidth();
+        int height = original.getHeight();
+        while ((width >> 1) > 0 && (height >> 1) > 0) {
+            width >>= 1;
+            height >>= 1;
+            maxLevel++;
+        }
+
+        NativeImage[] levels = new NativeImage[maxLevel + 1];
+        levels[0] = original;
+        boolean hasAlpha = hasAlpha(original);
+
+        for (int level = 1; level <= maxLevel; level++) {
+            NativeImage previous = levels[level - 1];
+            NativeImage next = new NativeImage(previous.getFormat(), previous.getWidth() >> 1,
+                previous.getHeight() >> 1, false);
+
+            for (int x = 0; x < next.getWidth(); x++) {
+                for (int y = 0; y < next.getHeight(); y++) {
+                    next.setColorArgb(x, y, blend(previous.getColorArgb(x * 2, y * 2),
+                        previous.getColorArgb(x * 2 + 1, y * 2),
+                        previous.getColorArgb(x * 2, y * 2 + 1),
+                        previous.getColorArgb(x * 2 + 1, y * 2 + 1), hasAlpha));
+                }
+            }
+
+            levels[level] = next;
+        }
+
+        return levels;
     }
 
     public static NativeImage[] getMipmapLevelsImages(NativeImage[] originals, int mipmap) {
@@ -84,13 +115,11 @@ public class MipmapUtil {
 
                     for (int l = 0; l < j; l++) {
                         for (int m = 0; m < k; m++) {
-                            nativeImage2.setColorArgb(l,
-                                m,
+                            nativeImage2.setColorArgb(l, m,
                                 blend(nativeImage.getColorArgb(l * 2, m * 2),
                                     nativeImage.getColorArgb(l * 2 + 1, m * 2),
                                     nativeImage.getColorArgb(l * 2, m * 2 + 1),
-                                    nativeImage.getColorArgb(l * 2 + 1, m * 2 + 1),
-                                    bl));
+                                    nativeImage.getColorArgb(l * 2 + 1, m * 2 + 1), bl));
                         }
                     }
 
@@ -143,8 +172,11 @@ public class MipmapUtil {
         int resG = (int) (Math.pow(outG, gamma) * 255.0);
         int resB = (int) (Math.pow(outB, gamma) * 255.0);
 
-        if (checkAlpha && resA < 96) {
-            resA = 0;
+        if (checkAlpha) {
+            float alphaCoverage =
+                (ColorHelper.getAlpha(one) + ColorHelper.getAlpha(two) + ColorHelper.getAlpha(three)
+                    + ColorHelper.getAlpha(four)) / (4.0F * 255.0F);
+            resA = alphaCoverage >= CUTOUT_ALPHA_COVERAGE_THRESHOLD ? 255 : 0;
         }
 
         return ColorHelper.getArgb(resA, resR, resG, resB);

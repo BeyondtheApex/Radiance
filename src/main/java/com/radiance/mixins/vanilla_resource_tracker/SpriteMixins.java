@@ -15,7 +15,7 @@ public abstract class SpriteMixins implements ISpriteExt {
     @Shadow
     private SpriteContents contents;
 
-    public void neoVoxelRT$setTargetID(int targetID) {
-        ((ISpriteContentsExt) contents).neoVoxelRT$setTargetID(targetID);
+    public void radiance$setTargetID(int targetID) {
+        ((ISpriteContentsExt) contents).radiance$setTargetID(targetID);
     }
 }

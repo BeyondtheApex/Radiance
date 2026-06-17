@@ -10,8 +10,6 @@ import net.minecraft.client.util.Window;
 
 public class RendererProxy {
 
-    private static int pipelineType = -1;
-
     public static native void initFolderPath(String folderPath);
 
     public static native void initRenderer(String[] glfwLibCandidates, long windowHandle);
@@ -36,19 +34,6 @@ public class RendererProxy {
         present();
     }
 
-    public static void bindOverlayPipeline(int type) {
-        pipelineType = type;
-    }
-
-    public static native void drawOverlay(int vertexId, int indexId, int pipelineType,
-        int indexCount, int indexType);
-
-    public static void drawOverlay(BufferProxy.VertexIndexBufferHandle handle, int indexCount,
-        VertexFormat.IndexType indexType) {
-        drawOverlay(handle.vertexId, handle.indexId, pipelineType, indexCount,
-            Constants.IndexTypes.getValue(indexType));
-    }
-
     public static native void fuseWorld();
 
     public static native void postBlur();
@@ -71,7 +56,7 @@ public class RendererProxy {
             mc.getWindow()
                 .getHeight();
         NativeImage nativeImage = new NativeImage(width, height, false);
-        ((INativeImageExt) (Object) nativeImage).neoVoxelRT$loadFromTextureImageWithoutUI(0, true);
+        ((INativeImageExt) (Object) nativeImage).radiance$loadFromTextureImageWithoutUI(0, true);
         return nativeImage;
     }
 }

@@ -126,3 +126,4 @@ core.lib
 libnvidia-ngx-dlss*
 include/
 shaders/
+libxess*

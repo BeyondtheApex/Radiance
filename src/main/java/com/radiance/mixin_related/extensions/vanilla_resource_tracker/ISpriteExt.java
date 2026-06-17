@@ -2,5 +2,5 @@ package com.radiance.mixin_related.extensions.vanilla_resource_tracker;
 
 public interface ISpriteExt {
 
-    void neoVoxelRT$setTargetID(int targetID);
+    void radiance$setTargetID(int targetID);
 }

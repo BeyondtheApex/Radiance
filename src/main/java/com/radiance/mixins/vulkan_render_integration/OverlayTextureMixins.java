@@ -16,7 +16,7 @@ public class OverlayTextureMixins implements IOverlayTextureExt {
     private NativeImageBackedTexture texture;
 
     @Override
-    public AbstractTexture neoVoxelRT$getTexture() {
+    public AbstractTexture radiance$getTexture() {
         return texture;
     }
 }

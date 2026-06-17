@@ -159,6 +159,59 @@ public class VideoOptionsScreenMixins extends GameOptionsScreenMixins {
                     Options.setChunkBuildingTotalBatches(value, true);
                 });
 
+        SimpleOption<Integer>
+            chunkBuildingThreads =
+            new SimpleOption<>(Options.CHUNK_BUILDING_THREADS_KEY, SimpleOption.emptyTooltip(),
+                (optionText, value) -> getGenericValueText(optionText,
+                    Text.literal(Integer.toString(value))),
+                new SimpleOption.ValidatingIntSliderCallbacks(1,
+                    Options.getMaxChunkBuildingThreads()),
+                Codec.intRange(1, Options.getMaxChunkBuildingThreads()),
+                Options.chunkBuildingThreads,
+                value -> Options.setChunkBuildingThreads(value, true));
+
+        SimpleOption<Boolean> collectChunkEmission = SimpleOption.ofBoolean(
+            Options.COLLECT_CHUNK_EMISSION_KEY,
+            Options.collectChunkEmission,
+            value -> Options.setCollectChunkEmission(value, true));
+
+        SimpleOption<Boolean> vrEnabled = SimpleOption.ofBoolean(
+            Options.VR_ENABLED_KEY,
+            Options.vrEnabled,
+            value -> Options.setVREnabled(value, true));
+
+        SimpleOption<Integer> vrRenderScale = new SimpleOption<>(Options.VR_RENDER_SCALE_KEY,
+            SimpleOption.emptyTooltip(),
+            (optionText, value) -> getGenericValueText(optionText,
+                Text.literal(String.format(java.util.Locale.ROOT, "%.2fx", value / 100.0f))),
+            new SimpleOption.ValidatingIntSliderCallbacks(10, 200),
+            Codec.intRange(10, 200),
+            Math.round(Options.vrRenderScale * 100.0f),
+            value -> Options.setVRRenderScale(value / 100.0f, true));
+
+        SimpleOption<Integer> vrIPD = new SimpleOption<>(Options.VR_IPD_KEY,
+            SimpleOption.emptyTooltip(),
+            (optionText, value) -> getGenericValueText(optionText,
+                Text.literal(String.format(java.util.Locale.ROOT, "%.3fm", value / 1000.0f))),
+            new SimpleOption.ValidatingIntSliderCallbacks(0, 120),
+            Codec.intRange(0, 120),
+            Math.round(Options.vrIPD * 1000.0f),
+            value -> Options.setVRIPD(value / 1000.0f, true));
+
+        SimpleOption<Integer> vrWorldScale = new SimpleOption<>(Options.VR_WORLD_SCALE_KEY,
+            SimpleOption.emptyTooltip(),
+            (optionText, value) -> getGenericValueText(optionText,
+                Text.literal(String.format(java.util.Locale.ROOT, "%.2fx", value / 100.0f))),
+            new SimpleOption.ValidatingIntSliderCallbacks(1, 500),
+            Codec.intRange(1, 500),
+            Math.round(Options.vrWorldScale * 100.0f),
+            value -> Options.setVRWorldScale(value / 100.0f, true));
+
+        SimpleOption<Boolean> postStereoSimulator = SimpleOption.ofBoolean(
+            Options.POST_STEREO_SIMULATOR_KEY,
+            Options.postStereoSimulator,
+            value -> Options.setPostStereoSimulator(value, true));
+
         SimpleOption<Boolean> pipelineSettings = new SimpleOption<>(Options.PIPELINE_SETUP_KEY,
             SimpleOption.emptyTooltip(),
             (optionText, value) -> optionText,
@@ -209,10 +262,20 @@ public class VideoOptionsScreenMixins extends GameOptionsScreenMixins {
             new CategoryVideoOptionEntry(Text.translatable(Options.CATEGORY_TERRAIN), body));
         this.body.addSingleOptionEntry(chunkBuildingBatchSize);
         this.body.addSingleOptionEntry(chunkBuildingTotalBatches);
+        this.body.addSingleOptionEntry(chunkBuildingThreads);
+        this.body.addSingleOptionEntry(collectChunkEmission);
 
         this.body.addEntry(
             new CategoryVideoOptionEntry(Text.translatable(Options.CATEGORY_PIPELINE), body));
         this.body.addSingleOptionEntry(pipelineSettings);
+
+        this.body.addEntry(
+            new CategoryVideoOptionEntry(Text.translatable(Options.CATEGORY_VR), body));
+        this.body.addSingleOptionEntry(vrEnabled);
+        this.body.addSingleOptionEntry(vrRenderScale);
+        this.body.addSingleOptionEntry(vrIPD);
+        this.body.addSingleOptionEntry(vrWorldScale);
+        this.body.addSingleOptionEntry(postStereoSimulator);
 
         ci.cancel();
     }

@@ -58,7 +58,7 @@ public class BlockModelRendererMixins {
             g = (i >> 8 & 0xFF) / 255.0F;
             h = (i & 0xFF) / 255.0F;
 
-            emission = ((IBlockColorsExt) this.colors).neoVoxelRT$getEmission(state, world, pos,
+            emission = ((IBlockColorsExt) this.colors).radiance$getEmission(state, world, pos,
                 quad.getTintIndex());
         } else {
             f = 1.0F;

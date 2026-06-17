@@ -6,9 +6,9 @@ import net.minecraft.client.world.ClientWorld;
 
 public interface IChunkBuilderExt {
 
-    SectionBuilder neoVoxelRT$getSectionBuilder();
+    SectionBuilder radiance$getSectionBuilder();
 
-    ClientWorld neoVoxelRT$getWorld();
+    ClientWorld radiance$getWorld();
 
-    BlockBufferAllocatorStorage neoVoxelRT$getBuffers();
+    BlockBufferAllocatorStorage radiance$getBuffers();
 }
