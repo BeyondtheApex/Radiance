@@ -1,6 +1,7 @@
 package com.radiance.client.option;
 
 import com.radiance.client.RadianceClient;
+import com.radiance.client.config.VRPerformanceConfig;
 import com.radiance.client.pipeline.Pipeline;
 import com.radiance.client.proxy.vulkan.TextureProxy;
 import com.radiance.client.proxy.vulkan.VRProxy;
@@ -51,6 +52,8 @@ public class Options {
     public static final String VR_IPD_KEY = "options.video.vr.ipd";
     public static final String VR_WORLD_SCALE_KEY = "options.video.vr.world_scale";
     public static final String POST_STEREO_SIMULATOR_KEY = "options.video.post_stereo_simulator";
+    public static final String VR_F3_CHARTS_KEY = "options.video.vr.f3_charts";
+    public static final String VR_F3_CHART_POSITION_KEY = "options.video.vr.f3_chart_position";
 
     public static final String UPSCALER_TYPE_NATIVE = "options.video.upscaler_type.native";
     public static final String UPSCALER_TYPE_FSR3 = "options.video.upscaler_type.fsr3";
@@ -80,6 +83,9 @@ public class Options {
     public static float vrIPD = 0.063f;
     public static float vrWorldScale = 1.0f;
     public static boolean postStereoSimulator = false;
+    public static boolean vrF3Charts = true;
+    public static VRPerformanceConfig.HudPosition vrF3ChartPosition =
+        VRPerformanceConfig.HudPosition.TOP_RIGHT;
 
     public static int getMaxChunkBuildingThreads() {
         int availableProcessors = Runtime.getRuntime().availableProcessors();
@@ -137,6 +143,10 @@ public class Options {
             setPostStereoSimulator(Boolean.parseBoolean(
                 props.getProperty("postStereoSimulator", String.valueOf(postStereoSimulator))),
                 false);
+            setVRF3Charts(Boolean.parseBoolean(
+                props.getProperty("vrF3Charts", String.valueOf(vrF3Charts))), false);
+            setVRF3ChartPosition(parseHudPosition(
+                props.getProperty("vrF3ChartPosition", vrF3ChartPosition.name())), false);
 
             overwriteConfig();
 //            System.out.println("Successfully read options: " + path);
@@ -165,6 +175,8 @@ public class Options {
         props.setProperty("vrIPD", String.valueOf(vrIPD));
         props.setProperty("vrWorldScale", String.valueOf(vrWorldScale));
         props.setProperty("postStereoSimulator", String.valueOf(postStereoSimulator));
+        props.setProperty("vrF3Charts", String.valueOf(vrF3Charts));
+        props.setProperty("vrF3ChartPosition", vrF3ChartPosition.name());
 
         try {
             Files.createDirectories(path.getParent());
@@ -300,6 +312,36 @@ public class Options {
         nativeSetPostStereoSimulator(enabled, write);
         if (write) {
             overwriteConfig();
+        }
+    }
+
+    public static void setVRF3Charts(boolean enabled, boolean write) {
+        Options.vrF3Charts = enabled;
+        VRPerformanceConfig.showDetailedCharts = enabled;
+        if (write) {
+            overwriteConfig();
+        }
+    }
+
+    public static void setVRF3ChartPosition(VRPerformanceConfig.HudPosition position,
+        boolean write) {
+        Options.vrF3ChartPosition = position == null
+            ? VRPerformanceConfig.HudPosition.TOP_RIGHT
+            : position;
+        VRPerformanceConfig.hudPosition = Options.vrF3ChartPosition;
+        if (write) {
+            overwriteConfig();
+        }
+    }
+
+    public static VRPerformanceConfig.HudPosition parseHudPosition(String value) {
+        if (value == null || value.isBlank()) {
+            return VRPerformanceConfig.HudPosition.TOP_RIGHT;
+        }
+        try {
+            return VRPerformanceConfig.HudPosition.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            return VRPerformanceConfig.HudPosition.TOP_RIGHT;
         }
     }
 }

@@ -1,6 +1,11 @@
 package com.radiance.client.gui;
 
+import static net.minecraft.client.option.GameOptions.getGenericValueText;
+
+import com.mojang.serialization.Codec;
 import com.radiance.Radiance;
+import com.radiance.client.config.VRPerformanceConfig;
+import com.radiance.client.option.Options;
 import com.radiance.client.pipeline.Module;
 import com.radiance.client.pipeline.ModuleEntry;
 import com.radiance.client.pipeline.Pipeline;
@@ -10,6 +15,7 @@ import com.radiance.client.pipeline.config.ImageConfig;
 import com.radiance.mixin_related.extensions.vulkan_render_integration.IDrawContextExt;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -23,6 +29,7 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.client.option.SimpleOption;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
@@ -42,6 +49,7 @@ public class RenderPipelineScreen extends Screen {
     private static final String RENDER_PIPELINE_SCREEN_RELOAD = "render_pipeline_screen.reload";
     private static final String RENDER_PIPELINE_SCREEN_ADD_MODULE = "render_pipeline_screen.add_module";
     private static final String RENDER_PIPELINE_SCREEN_SHADER_PACK = "render_pipeline_screen.shader_pack";
+    private static final String RENDER_PIPELINE_SCREEN_VR = "render_pipeline_screen.vr";
     private static final String RENDER_PIPELINE_SCREEN_BACK_HINT = "render_pipeline_screen.back_hint";
     private static final String RENDER_PIPELINE_SCREEN_REBUILDING = "render_pipeline_screen.rebuilding";
     private final Screen parent;
@@ -50,6 +58,7 @@ public class RenderPipelineScreen extends Screen {
     private ModuleNode draggedNode = null;
     private double lastMouseX, lastMouseY;
     private ModuleSelector activeSelector = null;
+    private VRSettingsPopup activeVRSettings = null;
     private ImageConfig localFinalOutput = null;
     private ImageConfig pendingPort = null;
     private boolean isPendingOutput = false;
@@ -113,6 +122,7 @@ public class RenderPipelineScreen extends Screen {
         clearChildren();
         activeSelector = null;
         activePresetSelector = null;
+        activeVRSettings = null;
         presetWidgets.clear();
 
         if (mode == Mode.PRESET && activePreset == null && !presets.isEmpty()) {
@@ -129,7 +139,9 @@ public class RenderPipelineScreen extends Screen {
         int toggleW = 110;
         int shaderPackX = toggleX + toggleW + 5;
         int shaderPackW = 110;
-        int secondaryX = shaderPackX + shaderPackW + 5;
+        int vrX = shaderPackX + shaderPackW + 5;
+        int vrW = 54;
+        int secondaryX = vrX + vrW + 5;
         int secondaryW = 150;
 
         addDrawableChild(
@@ -158,12 +170,24 @@ public class RenderPipelineScreen extends Screen {
             .dimensions(shaderPackX, 6, shaderPackW, 20)
             .build());
 
+        addDrawableChild(ButtonWidget.builder(Text.translatable(RENDER_PIPELINE_SCREEN_VR),
+                button -> {
+                    activeSelector = null;
+                    activePresetSelector = null;
+                    activeVRSettings = activeVRSettings == null
+                        ? new VRSettingsPopup(vrX, HEADER_HEIGHT + 4)
+                        : null;
+                })
+            .dimensions(vrX, 6, vrW, 20)
+            .build());
+
         if (mode == Mode.PIPELINE) {
             secondaryBtn = addDrawableChild(
                 ButtonWidget.builder(Text.translatable(RENDER_PIPELINE_SCREEN_ADD_MODULE),
                     button -> {
                         Map<String, ModuleEntry> entries = Pipeline.INSTANCE.getModuleEntries();
                         if (entries != null && !entries.isEmpty()) {
+                            activeVRSettings = null;
                             activeSelector = new ModuleSelector(secondaryX, HEADER_HEIGHT + 4,
                                 entries);
                         }
@@ -177,6 +201,7 @@ public class RenderPipelineScreen extends Screen {
                     .append(Text.literal(": "))
                     .append(activePresetText), button -> {
                     if (!presets.isEmpty()) {
+                        activeVRSettings = null;
                         activePresetSelector = new PresetSelector(secondaryX, HEADER_HEIGHT + 4,
                             presets);
                     }
@@ -322,6 +347,13 @@ public class RenderPipelineScreen extends Screen {
                 activePresetSelector.render(context, scaledMouseX, scaledMouseY);
                 context.getMatrices().pop();
             }
+        }
+
+        if (activeVRSettings != null) {
+            context.getMatrices().push();
+            context.getMatrices().translate(0, 0, 220);
+            activeVRSettings.render(context, scaledMouseX, scaledMouseY);
+            context.getMatrices().pop();
         }
 
         context.getMatrices().pop();
@@ -697,6 +729,13 @@ public class RenderPipelineScreen extends Screen {
         isPanning = false;
         draggedNode = null;
 
+        if (activeVRSettings != null && mouseY >= HEADER_HEIGHT) {
+            if (activeVRSettings.contains(mouseX, mouseY)) {
+                return activeVRSettings.mouseClicked(mouseX, mouseY, button);
+            }
+            activeVRSettings = null;
+        }
+
         if (mouseY < HEADER_HEIGHT) {
             return super.mouseClicked(mouseX, mouseY, button);
         }
@@ -822,6 +861,11 @@ public class RenderPipelineScreen extends Screen {
         mouseX /= GLOBAL_SCALE;
         mouseY /= GLOBAL_SCALE;
 
+        if (activeVRSettings != null && activeVRSettings.mouseDragged(mouseX, mouseY, button,
+            deltaX / GLOBAL_SCALE, deltaY / GLOBAL_SCALE)) {
+            return true;
+        }
+
         if (mode == Mode.PRESET) {
             return super.mouseDragged(mouseX, mouseY, button, deltaX / GLOBAL_SCALE,
                 deltaY / GLOBAL_SCALE);
@@ -861,6 +905,10 @@ public class RenderPipelineScreen extends Screen {
 
         mouseX /= GLOBAL_SCALE;
         mouseY /= GLOBAL_SCALE;
+
+        if (activeVRSettings != null && activeVRSettings.mouseReleased(mouseX, mouseY, button)) {
+            return true;
+        }
 
         lastMouseX = mouseX;
         lastMouseY = mouseY;
@@ -1036,6 +1084,134 @@ public class RenderPipelineScreen extends Screen {
 
     private List<ClickableWidget> buildPresetWidgets(Module module, AttributeConfig cfg) {
         return AttributeWidgetUtil.buildWidgets(module, cfg, textRenderer, 200, 64);
+    }
+
+    private class VRSettingsPopup {
+
+        private final int x, y, width, height;
+        private final List<ClickableWidget> widgets = new ArrayList<>();
+
+        private VRSettingsPopup(int x, int y) {
+            this.x = x;
+            this.y = y;
+            this.width = 230;
+
+            int rowH = 24;
+            int currentY = y + 6;
+            int widgetX = x + 6;
+            int widgetW = width - 12;
+
+            for (SimpleOption<?> option : buildOptions()) {
+                widgets.add(option.createWidget(MinecraftClient.getInstance().options,
+                    widgetX, currentY, widgetW));
+                currentY += rowH;
+            }
+
+            this.height = (currentY - y) + 6;
+        }
+
+        private List<SimpleOption<?>> buildOptions() {
+            List<SimpleOption<?>> options = new ArrayList<>();
+
+            options.add(SimpleOption.ofBoolean(
+                Options.VR_ENABLED_KEY,
+                Options.vrEnabled,
+                value -> Options.setVREnabled(value, true)));
+
+            options.add(new SimpleOption<>(Options.VR_RENDER_SCALE_KEY,
+                SimpleOption.emptyTooltip(),
+                (optionText, value) -> getGenericValueText(optionText,
+                    Text.literal(String.format(Locale.ROOT, "%.2fx", value / 100.0f))),
+                new SimpleOption.ValidatingIntSliderCallbacks(10, 200),
+                Codec.intRange(10, 200),
+                Math.round(Options.vrRenderScale * 100.0f),
+                value -> Options.setVRRenderScale(value / 100.0f, true)));
+
+            options.add(new SimpleOption<>(Options.VR_IPD_KEY,
+                SimpleOption.emptyTooltip(),
+                (optionText, value) -> getGenericValueText(optionText,
+                    Text.literal(String.format(Locale.ROOT, "%.3fm", value / 1000.0f))),
+                new SimpleOption.ValidatingIntSliderCallbacks(0, 120),
+                Codec.intRange(0, 120),
+                Math.round(Options.vrIPD * 1000.0f),
+                value -> Options.setVRIPD(value / 1000.0f, true)));
+
+            options.add(new SimpleOption<>(Options.VR_WORLD_SCALE_KEY,
+                SimpleOption.emptyTooltip(),
+                (optionText, value) -> getGenericValueText(optionText,
+                    Text.literal(String.format(Locale.ROOT, "%.2fx", value / 100.0f))),
+                new SimpleOption.ValidatingIntSliderCallbacks(1, 500),
+                Codec.intRange(1, 500),
+                Math.round(Options.vrWorldScale * 100.0f),
+                value -> Options.setVRWorldScale(value / 100.0f, true)));
+
+            options.add(SimpleOption.ofBoolean(
+                Options.POST_STEREO_SIMULATOR_KEY,
+                Options.postStereoSimulator,
+                value -> Options.setPostStereoSimulator(value, true)));
+
+            options.add(SimpleOption.ofBoolean(
+                Options.VR_F3_CHARTS_KEY,
+                Options.vrF3Charts,
+                value -> Options.setVRF3Charts(value, true)));
+
+            options.add(new SimpleOption<>(Options.VR_F3_CHART_POSITION_KEY,
+                SimpleOption.emptyTooltip(),
+                (optionText, value) -> getGenericValueText(optionText,
+                    Text.translatable("options.video.vr.f3_chart_position." + value.name()
+                        .toLowerCase(Locale.ROOT))),
+                new PotentialValuesBasedCallbacksNoValue<>(
+                    Arrays.asList(VRPerformanceConfig.HudPosition.TOP_LEFT,
+                        VRPerformanceConfig.HudPosition.TOP_RIGHT,
+                        VRPerformanceConfig.HudPosition.BOTTOM_LEFT,
+                        VRPerformanceConfig.HudPosition.BOTTOM_RIGHT),
+                    Codec.STRING.xmap(Options::parseHudPosition,
+                        VRPerformanceConfig.HudPosition::name)),
+                Options.vrF3ChartPosition,
+                value -> Options.setVRF3ChartPosition(value, true)));
+
+            return options;
+        }
+
+        private void render(DrawContext ctx, int mouseX, int mouseY) {
+            ctx.fill(x - 1, y - 1, x + width + 1, y + height + 1, 0xFFFFFFFF);
+            ctx.fill(x, y, x + width, y + height, 0xFF20242C);
+            for (ClickableWidget widget : widgets) {
+                widget.render(ctx, mouseX, mouseY, 0f);
+            }
+        }
+
+        private boolean contains(double mouseX, double mouseY) {
+            return mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + height;
+        }
+
+        private boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX,
+            double deltaY) {
+            for (ClickableWidget widget : widgets) {
+                if (widget.mouseDragged(mouseX, mouseY, button, deltaX, deltaY)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private boolean mouseClicked(double mouseX, double mouseY, int button) {
+            for (ClickableWidget widget : widgets) {
+                if (widget.mouseClicked(mouseX, mouseY, button)) {
+                    return true;
+                }
+            }
+            return true;
+        }
+
+        private boolean mouseReleased(double mouseX, double mouseY, int button) {
+            for (ClickableWidget widget : widgets) {
+                if (widget.mouseReleased(mouseX, mouseY, button)) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     private class PresetSelector {

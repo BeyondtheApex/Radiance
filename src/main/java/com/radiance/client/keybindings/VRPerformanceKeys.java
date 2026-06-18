@@ -1,6 +1,7 @@
 package com.radiance.client.keybindings;
 
 import com.radiance.client.gui.VRPerformanceManager;
+import com.radiance.client.option.Options;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
@@ -54,8 +55,7 @@ public class VRPerformanceKeys {
 
         // Toggle detailed charts
         if (TOGGLE_VR_CHARTS.wasPressed()) {
-            com.radiance.client.config.VRPerformanceConfig.showDetailedCharts =
-                !com.radiance.client.config.VRPerformanceConfig.showDetailedCharts;
+            Options.setVRF3Charts(!Options.vrF3Charts, true);
         }
 
         // Cycle HUD position
@@ -68,28 +68,26 @@ public class VRPerformanceKeys {
      * Cycle through HUD positions
      */
     private static void cycleHudPosition() {
-        var config = com.radiance.client.config.VRPerformanceConfig.class;
-
         switch (com.radiance.client.config.VRPerformanceConfig.hudPosition) {
             case TOP_LEFT:
-                com.radiance.client.config.VRPerformanceConfig.hudPosition =
-                    com.radiance.client.config.VRPerformanceConfig.HudPosition.TOP_RIGHT;
+                Options.setVRF3ChartPosition(
+                    com.radiance.client.config.VRPerformanceConfig.HudPosition.TOP_RIGHT, true);
                 break;
             case TOP_RIGHT:
-                com.radiance.client.config.VRPerformanceConfig.hudPosition =
-                    com.radiance.client.config.VRPerformanceConfig.HudPosition.BOTTOM_RIGHT;
+                Options.setVRF3ChartPosition(
+                    com.radiance.client.config.VRPerformanceConfig.HudPosition.BOTTOM_RIGHT, true);
                 break;
             case BOTTOM_RIGHT:
-                com.radiance.client.config.VRPerformanceConfig.hudPosition =
-                    com.radiance.client.config.VRPerformanceConfig.HudPosition.BOTTOM_LEFT;
+                Options.setVRF3ChartPosition(
+                    com.radiance.client.config.VRPerformanceConfig.HudPosition.BOTTOM_LEFT, true);
                 break;
             case BOTTOM_LEFT:
-                com.radiance.client.config.VRPerformanceConfig.hudPosition =
-                    com.radiance.client.config.VRPerformanceConfig.HudPosition.TOP_LEFT;
+                Options.setVRF3ChartPosition(
+                    com.radiance.client.config.VRPerformanceConfig.HudPosition.TOP_LEFT, true);
                 break;
             default:
-                com.radiance.client.config.VRPerformanceConfig.hudPosition =
-                    com.radiance.client.config.VRPerformanceConfig.HudPosition.TOP_RIGHT;
+                Options.setVRF3ChartPosition(
+                    com.radiance.client.config.VRPerformanceConfig.HudPosition.TOP_RIGHT, true);
                 break;
         }
     }
