@@ -96,8 +96,6 @@
   "render_pipeline.module.ray_tracing.attribute.moon_radiance": "Moon Radiance",
   "render_pipeline.module.ray_tracing.attribute.use_sharc": "Use SHaRC",
   "render_pipeline.module.ray_tracing.attribute.sharc_debug_mode": "SHaRC Debug Mode",
-  "render_pipeline.module.ray_tracing.attribute.foveated_inner_radius": "Foveated Inner Radius",
-  "render_pipeline.module.ray_tracing.attribute.foveated_outer_block_size": "Foveated Outer Block Size",
   "render_pipeline.module.temporal_accumulation.name": "Temporal Accumulation",
   "render_pipeline.module.tone_mapping.name": "Tone Mapping",
   "render_pipeline.module.tone_mapping.attribute.method": "Method",
