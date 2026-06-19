@@ -624,3 +624,47 @@ Status: in progress
   - Add rough-reflection sampling and denoiser-friendly stochastic controls.
   - Add transparent/alpha-aware reflection visibility and any-hit transmission.
   - Add tile/queue scheduling so reflection is not full-resolution for all eligible pixels.
+
+### Step 18: Diffuse GI Ray-Query Foundation
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_gi.hpp`
+  - `MCVR-custom/src/shader/world/deferred_rt/gi_common.glsl`
+  - `MCVR-custom/src/shader/world/deferred_rt/gi_fallback.comp`
+  - `MCVR-custom/src/shader/world/deferred_rt/gi_ray_query.comp`
+  - `MCVR-custom/src/shader/world/deferred_rt/compose.comp`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Intended behavior:
+  - Add a compute diffuse-GI pass after reflection and before compose.
+  - Consume the G-buffer, classification mask, view data, sky-derived environment parameters and shared TLAS.
+  - Write `primary_indirect_diffuse` and `gi_hit_distance` so the remaining public output contract is no longer permanently clear for diffuse indirect lighting.
+  - Keep Java/JNI unchanged; all inputs already exist in native buffers/images/AS.
+- Initial scope and limitations:
+  - The first pass is a deterministic foundation, not a final GI solution.
+  - Ray-query mode records first-hit distance along a normal-oriented diffuse probe ray and modulates a simple environment/proxy indirect term. It does not yet shade secondary materials, sample multiple directions, use reservoirs, denoise, or accumulate history.
+  - Fallback mode writes sky/ground ambient diffuse with zero GI hit distance.
+  - Full-resolution early-out remains acceptable for bring-up; tile/queue scheduling remains later work.
+- Substep 18.1 implemented:
+  - Added `DeferredRtGiData` and GI descriptor set 6:
+    - binding 0: TLAS,
+    - binding 1: module-private GI UBO.
+  - Added GI fallback and ray-query compute pipelines.
+  - Added pass order target: `clear -> fixed G-buffer -> classification -> direct_light -> reflection -> gi -> compose`.
+  - Compose now consumes `primary_indirect_diffuse` in addition to direct diffuse, specular, ambient diffuse and emission.
+  - The GI pass consumes the classification mask and writes only pixels marked `PIXEL_CLASSIFICATION_DIFFUSE_GI_ELIGIBLE`.
+  - The fallback path writes deterministic sky/ground diffuse indirect and zero hit distance. The ray-query path writes committed probe hit distance and modulates the proxy diffuse indirect term.
+- Verification progress:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after CMake regenerated shader targets for `gi_fallback.comp` and `gi_ray_query.comp`.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and generated `gi_fallback_comp.spv` plus `gi_ray_query_comp.spv`.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 4/4 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed `gi_fallback_comp.spv` plus `gi_ray_query_comp.spv` to both `MCVR-custom/bin/res/world/deferred_rt` and `Radiance-custom/src/main/resources/shaders/world/deferred_rt`.
+  - Pre-commit self-review checked GI descriptor set 6, pass order, output barriers before compose, TLAS read barriers, and shader-side GI hit-distance semantics.
+- Remaining work:
+  - Replace proxy sky/ground GI radiance with real secondary-hit material shading.
+  - Add multi-sample, temporal, denoiser-friendly stochastic GI controls instead of a single deterministic probe ray.
+  - Add transparent/alpha-aware GI visibility and any-hit transmission.
+  - Add tile/queue scheduling so diffuse GI is not full-resolution for every eligible pixel.
+  - Validate `gi_hit_distance` against NRD in an actual denoiser preset after the Java preset wiring selects the explicit `gi_hit_distance` output.
