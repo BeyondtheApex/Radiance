@@ -375,3 +375,49 @@ Status: in progress
   - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
   - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 3/3 tests passed.
   - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed `gbuffer_vert.spv`, `gbuffer_multiview_vert.spv` and `gbuffer_frag.spv` to both `MCVR-custom/bin/res/world/deferred_rt` and `Radiance-custom/src/main/resources/shaders/world/deferred_rt`.
+
+### Step 13: Fixed Compose Bring-up
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/shader/world/deferred_rt/compose.comp`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Intended behavior:
+  - Add a deterministic compute compose pass after the fixed G-buffer pass.
+  - Read primary G-buffer outputs and write a valid HDR `primary_radiance` export for ToneMapping/PostRender bring-up.
+  - Fill `primary_direct_diffuse` with the same conservative direct lighting signal used by radiance.
+  - Preserve split indirect/specular/reflection/fog/refraction/GI outputs as explicit clear-only placeholders until the ray-query lighting stages are implemented.
+- Design constraint:
+  - This step is not the final RT lighting path. It is the first stable composed output stage so downstream modules no longer receive only black radiance from Deferred RT.
+  - RT shadow, reflection and GI classification remain separate later stages; do not encode them as hidden approximations here.
+- Implemented:
+  - Added a module-owned `compose_comp.spv` compute shader and `composePipeline_` using the existing Deferred RT descriptor table/pipeline layout.
+  - Added a post-G-buffer image barrier from raster color-attachment writes and clear-only compute writes into `VK_IMAGE_LAYOUT_GENERAL` for compute read/write.
+  - Added `renderComposePass()` after the fixed G-buffer pass.
+  - The compose shader reads:
+    - `primary_albedo_metallic`,
+    - `primary_normal_roughness`,
+    - `primary_linear_depth`,
+    - `primary_depth`,
+    - `primary_emission`.
+  - The compose shader writes:
+    - `primary_radiance -> radiance`,
+    - `primary_direct_diffuse -> first_hit_diffuse_direct_light`.
+  - Invalid/sky pixels remain at the deterministic values produced by `clear_contract.comp`.
+  - The direct diffuse signal is intentionally conservative and deterministic: fixed ambient plus a fixed directional term from G-buffer normal/albedo. It is a bring-up signal only, not final world lighting.
+- Preserved placeholders:
+  - `primary_indirect_diffuse`, `primary_specular`, `primary_clear`, `atmosphere_fog`, `primary_refraction`, `reflection_hit_distance` and `gi_hit_distance` remain clear-only until ray-query lighting/classification stages are implemented.
+  - No Java/JNI input contract change was needed for this step.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and generated `shaders/world/deferred_rt/compose_comp.spv`.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 3/3 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed `compose_comp.spv` to both `MCVR-custom/bin/res/world/deferred_rt` and `Radiance-custom/src/main/resources/shaders/world/deferred_rt`.
+- Remaining work:
+  - Add pixel classification before ray-query passes.
+  - Add direct-light visibility/shadow ray queries against the shared AS.
+  - Add reflection/specular ray queries and valid `reflection_hit_distance`.
+  - Add diffuse GI ray queries and valid `gi_hit_distance`.
+  - Decide final compose behavior for NRD-enabled presets once denoiser-valid split lighting is produced.
