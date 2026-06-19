@@ -579,3 +579,48 @@ Status: in progress
   - Add a runtime GPU readback/debug fixture for material/classification masks.
   - Validate tangent-frame normal-map orientation against representative LabPBR resource packs in a captured frame.
   - Reflection and GI passes still need to consume the now-populated roughness/F0/metallic data.
+
+### Step 17: Specular Reflection Ray-Query Foundation
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_reflection.hpp`
+  - `MCVR-custom/src/shader/world/deferred_rt/reflection_common.glsl`
+  - `MCVR-custom/src/shader/world/deferred_rt/reflection_fallback.comp`
+  - `MCVR-custom/src/shader/world/deferred_rt/reflection_ray_query.comp`
+  - `MCVR-custom/src/shader/world/deferred_rt/compose.comp`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Intended behavior:
+  - Add a compute reflection pass after direct light and before compose.
+  - Consume `primary_normal_roughness`, `primary_specular_albedo`, `primary_albedo_metallic`, `primary_depth`, the classification mask and the shared TLAS.
+  - Use ray query when runtime support and TLAS are available, otherwise use an explicit deterministic environment fallback.
+  - Write `primary_specular` and `reflection_hit_distance` so downstream denoisers/upscalers have real specular guide outputs instead of permanent clear values.
+  - Keep Java/JNI unchanged; the pass only uses existing native G-buffer, classification, AS and sky/view data.
+- Initial scope and limitations:
+  - This step is a foundation for visibility and material-driven eligibility. It does not yet shade the reflected hit material, evaluate recursive bounces, SSR, rough reflection sampling, or transparent reflection.
+  - Ray-query hit radiance starts as a conservative visibility-aware environment/proxy term; exact secondary-hit shading will need scene material lookup or a compact hit-shading path in a later step.
+  - Reflection work is still full-resolution with early-out from the classification mask; tile queues/counters remain later work.
+- Substep 17.1 implemented:
+  - Added `DeferredRtReflectionData` and reflection descriptor set 5:
+    - binding 0: TLAS,
+    - binding 1: module-private reflection UBO.
+  - Added reflection fallback and ray-query compute pipelines.
+  - Added pass order target: `clear -> fixed G-buffer -> classification -> direct_light -> reflection -> compose`.
+  - Compose now consumes `primary_specular` in addition to direct diffuse, ambient diffuse and emission.
+  - The reflection pass consumes the classification mask, so only Step 16 material-refined low-roughness/specular/metallic pixels run reflection work.
+  - The fallback path writes deterministic environment specular and zero hit distance. The ray-query path writes the committed reflection hit distance and applies a conservative visibility-aware scale to the environment/proxy specular term.
+  - The shared TLAS memory barrier now covers both direct-light and reflection ray-query pipelines instead of depending on direct light alone.
+- Verification progress:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after CMake regenerated shader targets for `reflection_fallback.comp` and `reflection_ray_query.comp`.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and generated `reflection_fallback_comp.spv` plus `reflection_ray_query_comp.spv`.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 4/4 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed `reflection_fallback_comp.spv` plus `reflection_ray_query_comp.spv` to both `MCVR-custom/bin/res/world/deferred_rt` and `Radiance-custom/src/main/resources/shaders/world/deferred_rt`.
+  - After tightening the TLAS memory-barrier condition, `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully again: 4/4 tests passed.
+- Remaining work:
+  - Replace the proxy/environment reflected-hit radiance with real secondary-hit material shading.
+  - Add rough-reflection sampling and denoiser-friendly stochastic controls.
+  - Add transparent/alpha-aware reflection visibility and any-hit transmission.
+  - Add tile/queue scheduling so reflection is not full-resolution for all eligible pixels.
