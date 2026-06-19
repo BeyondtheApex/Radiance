@@ -188,6 +188,70 @@ Status: in progress
   - After adding the const context accessor, `cmake --build MCVR-custom/build-radiance-custom --config Release --target core shaders mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
   - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 1/1 tests passed.
 
+### Step 9: Scene Packet Metadata Retention
+
+- Status: completed.
+- Files:
+  - `MCVR-custom/src/core/render/chunks.hpp`
+  - `MCVR-custom/src/core/render/chunks.cpp`
+  - `MCVR-custom/src/core/render/entities.hpp`
+  - `MCVR-custom/src/core/render/entities.cpp`
+- Implemented behavior:
+  - Preserved per-geometry `geometryType`, `textureId`, vertex count and index count from existing native build tasks.
+  - Extended `ChunkRenderData`, `Chunk1` and `Entity` so a neutral scene provider can build real `SceneDrawPacket` ranges and material bindings without scanning vertex data or reaching back into Java.
+- Design note:
+  - This does not change the JNI input ABI. Java already passes these values; native code previously used part of them for BLAS/material packing and then dropped the metadata needed by raster G-buffer passes.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after the data-model step.
+
+### Step 10: Scene Provider Boundary
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/scene_provider/scene_provider.hpp`
+  - `MCVR-custom/src/core/render/scene_provider/mcvr_scene_provider.hpp`
+  - `MCVR-custom/src/core/render/scene_provider/mcvr_scene_provider.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/tests/deferred_rt_scene_provider_test.cpp`
+- Intended behavior:
+  - Add a neutral `SceneProvider` contract that exposes views, opaque/cutout/translucent draw packets and acceleration metadata without leaking Java, Blaze3D, Vulkan layout, PT SBT or shaderpack concepts.
+  - Add an `McvrSceneProvider` that adapts the current chunk/entity data retained in Step 9.
+  - Connect `DeferredRtModule` to begin a scene-provider frame before its current deterministic clear pass, without starting G-buffer rendering yet.
+- Design notes:
+  - Existing JNI inputs remain sufficient for this phase; the provider consumes native-side scene/geometry/material/texture metadata already supplied by Java.
+  - `WORLD_TRANSPARENT` is classified as cutout for first G-buffer bring-up because the current Java input collapses true translucent and alpha-tested block layers into one geometry type.
+  - True translucent/water/glass layer identity still requires a later Java/native metadata extension; the provider boundary leaves that extension localized.
+- Partial implementation:
+  - Added the neutral `SceneProvider` contract and draw/view/range helper declarations.
+  - Kept the neutral contract free of `World`, Blaze3D and full Vulkan wrapper includes; concrete source classification lives in an MCVR adapter helper.
+  - Added CPU tests for MCVR geometry classification, draw-range accumulation, stereo view/layer mapping and packet stats.
+- Verification:
+  - First `mcvr_tests` build after adding tests failed because the test target did not include all headers required by `all_extern.hpp`.
+  - After reducing the provider header dependencies and fixing test include paths, CMake reconfiguration reached third-party dependency setup and failed updating `zlib-ng` from GitHub: `Failed to connect to github.com port 443`.
+  - Reconfigured with Zulu 21 JNI paths and `FETCHCONTENT_UPDATES_DISCONNECTED*` enabled so local third-party dependency state is used without network updates.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 2/2 tests passed.
+- Next step:
+  - Implement runtime `McvrSceneProvider` packet enumeration and connect `DeferredRtModule` to begin a provider frame before the clear pass.
+- Runtime provider implementation:
+  - Added `McvrSceneProvider` that reads current chunk/entity render data and emits neutral `SceneDrawPacket`s.
+  - Tightened the neutral `SceneProvider` header to depend only on GLM and Vulkan core scalar types; the MCVR adapter keeps the heavier renderer/framework includes.
+  - Packet ranges are built from retained per-geometry vertex/index counts rather than scanning vertices.
+  - Chunks and entities are bucketed into opaque/cutout/translucent streams with packet/index counters and explicit skipped-packet counters.
+  - Views are derived from current and last `WorldUBO`, including per-eye view/projection offsets, layer indices and jitter.
+  - Acceleration metadata is exposed from `ScenePrepareContext` without exposing PT SBT or hit-group concepts.
+  - `DeferredRtModule` now owns `ScenePrepare`; each `DeferredRtModuleContext` owns an `McvrSceneProvider`.
+  - `render3D` runs scene preparation and provider `beginFrame()` before the placeholder clear pass.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after connecting Deferred RT to `ScenePrepare` and `McvrSceneProvider`.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core shaders mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 2/2 tests passed.
+- Deferred work:
+  - No G-buffer draw recording yet; the provider now exposes the draw streams required for that next phase.
+  - Previous entity object transforms currently mirror current provider transforms unless `ScenePrepareContext` metadata is consumed by a later motion-vector implementation.
+  - True translucent/cutout separation still needs a future Java/native metadata extension because current MCVR inputs collapse several render layers into `WORLD_TRANSPARENT`.
+
 ## Open Issues
 
 - The first milestone does not implement G-buffer rasterization, ray-query lighting, scene provider extraction, deferred shaderpack runtime, or offline runner.
