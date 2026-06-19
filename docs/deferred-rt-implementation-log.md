@@ -421,3 +421,53 @@ Status: in progress
   - Add reflection/specular ray queries and valid `reflection_hit_distance`.
   - Add diffuse GI ray queries and valid `gi_hit_distance`.
   - Decide final compose behavior for NRD-enabled presets once denoiser-valid split lighting is produced.
+
+### Step 14: Pixel Classification Foundation
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_classification.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_classification.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/shader/world/deferred_rt/classify.comp`
+  - `MCVR-custom/tests/deferred_rt_classification_test.cpp`
+  - `MCVR-custom/tests/CMakeLists.txt`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Intended behavior:
+  - Add an internal `R32_UINT image2DArray` classification mask resource.
+  - Generate one mask value per active pixel/layer after the G-buffer and before lighting/compose.
+  - Define explicit eligibility bits for valid primary surface, sky/background, direct-light visibility, diffuse GI, specular/reflection and transparent/refraction.
+  - Keep the classification mask native-private so the public output contract remains stable.
+  - Keep Java/JNI unchanged; all inputs come from existing G-buffer outputs and native scene state.
+- Design notes:
+  - This step creates the stable input contract for later direct-light, reflection and GI ray-query passes.
+  - Debug counters/compacted queues are not implemented in this substep because there is no GPU readback/instrumentation path yet. They remain required before marking Phase 5.1 fully complete.
+- Implemented:
+  - Added `deferred_rt_classification.hpp/.cpp` with the native-private classification mask contract:
+    - format: `VK_FORMAT_R32_UINT`,
+    - descriptor set: 3,
+    - binding: 0,
+    - bits for valid primary, sky/background, direct-light eligibility, diffuse GI eligibility, specular/reflection eligibility and transparent/refraction eligibility.
+  - Added CPU-side helper logic and tests for invalid pixels, direct/GI eligibility, reflection roughness/specular thresholds and refraction eligibility.
+  - Added a module-owned `classificationMasks_` image per frame, allocated as layered `R32_UINT` storage image.
+  - Added descriptor set 3 to the existing Deferred RT pipeline layout and bound the classification mask for every frame.
+  - Added `classify_comp.spv` and `classifyPipeline_`.
+  - Added `renderClassificationPass()` after fixed G-buffer and before compose.
+  - The shader reads primary G-buffer depth/material outputs and writes one mask value per pixel/layer.
+  - The first material implementation marks valid opaque/cutout primary surfaces as direct-light and diffuse-GI eligible. Reflection is skipped for high-roughness pixels based on the documented threshold.
+- Current limitations:
+  - Runtime debug counters and compacted queues are still missing; classification is present as a full-resolution mask only.
+  - Refraction eligibility is defined in the CPU contract, but the current fixed G-buffer does not yet rasterize translucent/refraction primaries, so the GPU mask does not set the refraction bit yet.
+  - The current fixed G-buffer writes roughness as 1.0 and metallic as 0.0, so ordinary surfaces will not enter reflection until material refinement writes real roughness/specular data.
+  - There is still no GPU readback fixture for validating mask contents in captured frames.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after adding the CPU classification contract test.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after adding the internal classification image and compute pass.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 4/4 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed `classify_comp.spv` to both `MCVR-custom/bin/res/world/deferred_rt` and `Radiance-custom/src/main/resources/shaders/world/deferred_rt`.
+- Remaining work:
+  - Add GPU classification counters or a readback/debug path.
+  - Add direct-light ray-query pass that consumes the classification mask and shared AS.
+  - Feed reflection eligibility with real material roughness/specular data.
+  - Add transparent/refraction primary handling before enabling the GPU refraction bit.
