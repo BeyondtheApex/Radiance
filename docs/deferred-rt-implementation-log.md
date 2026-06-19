@@ -791,3 +791,92 @@ Status: in progress
 - Remaining work:
   - Implement real fog, clear/clearcoat and transparent/refraction producers.
   - Validate NRD quality after Deferred RT presets connect `primary_emission`, `atmosphere_fog`, `primary_clear` and `primary_refraction` through the Java graph.
+
+### Step 23: Lighting Pass GPU Statistics
+
+- Status: in progress.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_pass_stats.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_pass_stats.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/shader/world/deferred_rt/pass_stats_common.glsl`
+  - `MCVR-custom/src/shader/world/deferred_rt/direct_light_common.glsl`
+  - `MCVR-custom/src/shader/world/deferred_rt/direct_light_fallback.comp`
+  - `MCVR-custom/src/shader/world/deferred_rt/direct_light_ray_query.comp`
+  - `MCVR-custom/src/shader/world/deferred_rt/reflection_common.glsl`
+  - `MCVR-custom/src/shader/world/deferred_rt/reflection_fallback.comp`
+  - `MCVR-custom/src/shader/world/deferred_rt/reflection_ray_query.comp`
+  - `MCVR-custom/src/shader/world/deferred_rt/gi_common.glsl`
+  - `MCVR-custom/src/shader/world/deferred_rt/gi_fallback.comp`
+  - `MCVR-custom/src/shader/world/deferred_rt/gi_ray_query.comp`
+  - `MCVR-custom/tests/deferred_rt_pass_stats_test.cpp`
+  - `MCVR-custom/tests/CMakeLists.txt`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Intended behavior:
+  - Add a native-only GPU statistics buffer for actual direct-light, reflection and GI pass work.
+  - Count in-bounds pass pixels, eligible pixels, ray queries, ray hits/misses or occlusions, lit direct-light pixels and fallback-produced reflection/GI pixels.
+  - Reuse the existing frame-latency staging readback policy used by classification stats.
+  - Keep Java/JNI unchanged.
+- Initial scope and limitations:
+  - This step exposes native CPU snapshots only; no Java debug overlay or UI is added.
+  - These are pass-level counters, not compacted/tiled queue counters. Later tile/queue scheduling can either refine these counters or add queue-specific counters.
+- Verification progress:
+  - Implementation in progress; build and CTest pending.
+
+### Step 24: Java/Native Raster Metadata Extension Design
+
+- Status: planned.
+- Target files:
+  - `Radiance-custom/src/main/java/com/radiance/client/constant/Constants.java`
+  - `Radiance-custom/src/main/java/com/radiance/client/vertex/PBRVertexConsumer.java`
+  - `Radiance-custom/src/main/java/com/radiance/client/proxy/world/ChunkProxy.java`
+  - `Radiance-custom/src/main/java/com/radiance/client/proxy/world/EntityProxy.java`
+  - `MCVR-custom/src/core/middleware/com_radiance_client_proxy_world_ChunkProxy.cpp`
+  - `MCVR-custom/src/core/middleware/com_radiance_client_proxy_world_EntityProxy.cpp`
+  - `MCVR-custom/src/core/render/chunks.hpp`
+  - `MCVR-custom/src/core/render/chunks.cpp`
+  - `MCVR-custom/src/core/render/entities.hpp`
+  - `MCVR-custom/src/core/render/entities.cpp`
+  - `MCVR-custom/src/core/render/scene_provider/scene_provider.hpp`
+  - `MCVR-custom/src/core/render/scene_provider/mcvr_scene_provider.cpp`
+  - `MCVR-custom/tests/deferred_rt_scene_provider_test.cpp`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+- Problem statement:
+  - The current Java-to-native scene payload has PT/hybrid-renderer history. It carries PBR vertices, texture ids, LabPBR mappings, geometry types and enough range metadata for the first opaque/cutout G-buffer path.
+  - It is not a complete raster draw-state stream. `WORLD_TRANSPARENT` currently collapses cutout, true translucent and several special render-layer cases, and the fixed Deferred RT provider maps that value to cutout only as a bring-up fallback.
+  - Minecraft/Blaze3D reference sources under `G:\cpp\radiance\mcsrc` show that the raster path needs more than transparency: `RenderPipeline` carries blend, depth test/write, cull, write masks, depth bias, vertex mode, stencil and pipeline sort key; `RenderSetup` adds output target, lightmap/overlay, outline/crumbling, layering and `sortOnUpload`.
+  - The Java pipeline already supports dynamic native pipeline rebuilds/switches. Future presets may switch between PT and Deferred RT, so duplicated AS/scene preparation would be a performance and ownership problem.
+  - Full deferred raster support needs neutral render-state and material-semantic metadata behind `SceneProvider`, not Minecraft/Blaze3D/PT concepts exposed to shaderpacks.
+- Intended behavior:
+  - Define a versioned Java/native metadata extension for raster classification.
+  - Preserve compatibility with old payloads by keeping the current opaque/cutout fallback path.
+  - Extend `SceneDrawPacket` or `SceneMaterialBinding` with neutral render-state fields:
+    - alpha mode,
+    - blend mode,
+    - depth test/write policy,
+    - cull mode,
+    - polygon offset,
+    - depth bias,
+    - color/depth write masks,
+    - output target class,
+    - layering class,
+    - lightmap/overlay requirements,
+    - outline/crumbling flags,
+    - sort-on-upload flag,
+    - pipeline sort key or ordered stream index,
+    - optional stencil policy.
+  - Add neutral material semantic flags for water, glass, refraction/transmission, portal, weather, text, particle and overlay-like content.
+  - Keep the metadata per draw/geometry rather than per vertex so chunk meshes do not grow unnecessarily.
+  - Define a pipeline-level shared scene runtime plan so PT and Deferred RT consume the same `ScenePrepare`/TLAS metadata when both paths are present or when users dynamically switch presets.
+  - Keep PT source-compatible; PT modules can ignore the extended raster metadata.
+- Initial scope and limitations:
+  - This step is a design/ABI step. It should not implement full transparent rendering, refraction or forward transparent compose.
+  - Shaderpack syntax remains neutral. Do not expose Java `RenderLayer`, Blaze3D classes, PT SBT concepts or raw Vulkan state in deferred shaderpacks.
+  - If metadata is missing, the provider must keep routing content through conservative defaults and emit diagnostics/counters for fallback classification.
+- Completion standard:
+  - The architecture document lists the current payload strengths, current limitations and the provider-side extension policy.
+  - Scene-provider tests cover old-payload fallback and extended-metadata classification for opaque, cutout and true translucent packets.
+  - Deferred RT can distinguish cutout from true translucent content when extended metadata is present, without changing public module outputs.
+  - The plan identifies `WorldPipeline` or a shared scene runtime as the final owner of `ScenePrepare`, rather than each module owning an independent instance.
+  - Debug counters or tests are planned for "one AS preparation per frame" when PT and Deferred RT coexist in the same diagnostic pipeline.
