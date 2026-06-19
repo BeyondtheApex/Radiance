@@ -743,3 +743,24 @@ Status: in progress
 - Remaining work:
   - Add a native debug overlay/log line or offline-runner report that consumes `latestClassificationStats()`.
   - Add pass-specific ray counters once direct-light/reflection/GI scheduling becomes queue/tile based.
+
+### Step 21: Compose Uses Deferred Lighting Only
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/shader/world/deferred_rt/compose.comp`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Intended behavior:
+  - Align the compose pass with the Phase 5.5 contract: `primary_radiance` is composed from direct diffuse, indirect diffuse/GI, specular/reflection and emission outputs produced by the deferred lighting passes.
+  - Remove the fixed shader-local ambient term now that `primary_indirect_diffuse` is populated by the GI pass.
+  - Keep Java/JNI and the public output contract unchanged.
+- Substep 21.1 implemented:
+  - Removed the hard-coded normal-weighted ambient contribution from `compose.comp`.
+  - `radiance` is now `directDiffuse + indirectDiffuse + specular + emission`.
+  - Kept the shared descriptor table contract unchanged; the compose shader now simply does not depend on albedo/normal for ambient reconstruction.
+- Verification progress:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and regenerated `compose_comp.spv`.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 4/4 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed the updated `compose_comp.spv` to both `MCVR-custom/bin/res/world/deferred_rt` and `Radiance-custom/src/main/resources/shaders/world/deferred_rt`.
+- Remaining work:
+  - Add fog, clear coat and refraction contributions to compose once those passes write non-placeholder outputs.
