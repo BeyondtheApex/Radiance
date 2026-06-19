@@ -764,3 +764,30 @@ Status: in progress
   - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed the updated `compose_comp.spv` to both `MCVR-custom/bin/res/world/deferred_rt` and `Radiance-custom/src/main/resources/shaders/world/deferred_rt`.
 - Remaining work:
   - Add fog, clear coat and refraction contributions to compose once those passes write non-placeholder outputs.
+
+### Step 22: Compose Clear/Fog/Refraction Contract Inputs
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/shader/world/deferred_rt/compose.comp`
+  - `MCVR-custom/src/shader/world/deferred_rt/clear_contract.comp`
+  - `MCVR-custom/src/shader/world/deferred_rt/gbuffer.frag`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Intended behavior:
+  - Complete the non-denoiser `primary_radiance` compose contract for the public split outputs that already exist: direct diffuse, indirect diffuse/GI, specular/reflection, emission, fog, clear and refraction.
+  - Keep zero-placeholder clear/refraction outputs harmless until their real passes exist.
+  - Preserve compatibility with existing NRD compose semantics for fog disabling and emissive alpha.
+- Substep 22.1 implemented:
+  - Added `first_hit_clear`, `fog_image` and `first_hit_refraction` reads to `compose.comp`.
+  - Clear contribution now overrides the normal direct/indirect/specular path when `first_hit_clear.a > 0`.
+  - Refraction contribution is added only when `first_hit_refraction.a > 0.5`.
+  - Fog contribution uses the existing compose sentinel: `fog_image.a < 0` disables fog; otherwise alpha is treated as transmittance and RGB as additive fog.
+  - `clear_contract.comp` now clears `fog_image` to `(0, 0, 0, -1)` instead of `(0, 0, 0, 0)` so zero-placeholder fog does not black out compose paths that follow the sentinel rule.
+  - `gbuffer.frag` now writes `primary_emission.a = 1.0` for valid G-buffer surfaces, matching the existing NRD compose path that multiplies emission RGB by alpha.
+- Verification progress:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and regenerated `clear_contract_comp.spv`, `compose_comp.spv` and `gbuffer_frag.spv`.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 4/4 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed the updated Deferred RT shader SPIR-V files to both `MCVR-custom/bin/res/world/deferred_rt` and `Radiance-custom/src/main/resources/shaders/world/deferred_rt`.
+- Remaining work:
+  - Implement real fog, clear/clearcoat and transparent/refraction producers.
+  - Validate NRD quality after Deferred RT presets connect `primary_emission`, `atmosphere_fog`, `primary_clear` and `primary_refraction` through the Java graph.
