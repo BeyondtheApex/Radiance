@@ -292,3 +292,86 @@ Status: in progress
   - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 3/3 tests passed.
 - Deferred work:
   - No Vulkan render pass, framebuffer, graphics pipeline or shader recording is connected yet; the new plan layer is ready for that implementation.
+
+### Step 12: Fixed Vulkan G-buffer Pass
+
+- Status: in progress.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/shader/world/deferred_rt/gbuffer.vert`
+  - `MCVR-custom/src/shader/world/deferred_rt/gbuffer.frag`
+- Intended behavior:
+  - Add a fixed graphics G-buffer pass after the deterministic clear pass.
+  - Use `SceneProvider` draw packets only; do not read chunks/entities directly from the module.
+  - Write real primary albedo/specular/normal/depth/motion/emission exports for opaque and cutout geometry.
+  - Preserve array-layer output compatibility for mono, per-layer stereo fallback and multiview-capable devices.
+  - Keep lighting, reflection, fog, refraction and GI outputs as clear-only placeholders until later passes are implemented.
+- Notes:
+  - The first Vulkan implementation may keep the existing compute clear before G-buffer rendering. That is extra work but behaviorally correct because the render pass overwrites all first-stage G-buffer attachments and leaves later-pass exports deterministic.
+- Resume status:
+  - Native repository still only has unrelated middleware edits outside Deferred RT ownership.
+  - Step 12 code was not yet committed or partially applied; implementation resumes from the clear-only module plus Step 11 CPU G-buffer plan.
+- Current substep:
+  - Add the native prerequisites needed by indexed raster G-buffer rendering without changing the Java/JNI ABI:
+    - depth-image per-layer views must use depth aspect rather than color aspect.
+    - packed chunk/entity index buffers must be created with `VK_BUFFER_USAGE_INDEX_BUFFER_BIT` so G-buffer draw calls can bind them directly.
+- Implemented prerequisites:
+  - `DeviceLocalImage::createPerLayerViews()` now uses the same usage-derived aspect mask as normal image views, so depth images can safely create per-layer 2D views.
+  - Chunk packed index buffers now include `VK_BUFFER_USAGE_INDEX_BUFFER_BIT` for both single-build and batched-build paths.
+  - Entity packed index buffers now include `VK_BUFFER_USAGE_INDEX_BUFFER_BIT`.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after the prerequisite changes.
+- G-buffer data-path decision:
+  - The fixed raster pass will extend the existing Deferred RT descriptor table instead of creating a second pipeline layout. Set 0 remains the compute clear storage-image set.
+  - Set 1 will be the bound texture array that mirrors the existing world texture input contract.
+  - Set 2 will be a per-frame storage buffer containing provider-derived view/draw records. This avoids Java/JNI changes and avoids oversized push constants.
+  - The first fixed pass will use provider view matrices and draw packet material data directly; texture mapping and deeper PBR map interpretation remain a later lighting/material refinement because this milestone only needs primary albedo, normal, depth, motion and emission exports.
+- Layer-plan correction:
+  - Updated the Step 11 `GBufferLayerPlan` multiview framebuffer rule before creating real framebuffers: framebuffer count stays 1, but framebuffer layer count is 1 for Vulkan multiview render passes. Array-layer selection comes from the subpass view mask, not from framebuffer layers.
+  - Updated the CPU G-buffer test expectation accordingly.
+- Frame-data layout correction:
+  - Split the planned set 2 frame-data binding into two storage buffers:
+    - binding 0: `DeferredRtGBufferViewData[]`
+    - binding 1: `DeferredRtGBufferDrawData[]`
+  - Reason: GLSL cannot naturally expose two unsized runtime arrays from one SSBO. Keeping view and draw records in separate bindings makes the C++/GLSL contract direct and avoids offset-packing shortcuts.
+  - No Java/JNI change is required; both buffers are built from the existing native `SceneProvider` view and draw packets.
+- Vulkan command path:
+  - Added per-frame upload of provider-derived G-buffer view records and draw records.
+  - Added storage-buffer descriptor binding for those records in Deferred RT set 2.
+  - Added clear-to-G-buffer barriers: public G-buffer attachments transition from compute `GENERAL` clear into `COLOR_ATTACHMENT_OPTIMAL`; clear-only outputs stay in `GENERAL`.
+  - Added internal depth transition and fixed G-buffer render pass execution for multiview and per-layer fallback.
+  - Added indexed draw recording from `SceneDrawPacket` streams only. Opaque and cutout streams are recorded; cutout enables shader alpha test.
+- Shader path:
+  - Added fixed `gbuffer.vert` and `gbuffer.frag`.
+  - The shader reads provider SSBOs plus existing packed position/material vertex buffers through BDA.
+  - The shader writes primary albedo/metallic, specular albedo, normal/roughness, motion vector, linear depth, primary depth and base emission.
+  - Motion vectors use the legacy pixel-space convention: previous pixel minus current pixel.
+  - Normal/specular texture mapping and full PBR material interpretation remain deferred material-refinement work; the first pass consumes the existing base texture, vertex color, alpha test and provider material flags.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after adding the G-buffer pass and shaders.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 3/3 tests passed.
+- Current follow-up before milestone commit:
+  - Improve provider `previousObjectToWorld` so static geometry motion vectors include camera movement without requiring a Java/JNI input extension.
+- Provider motion-vector refinement:
+  - `McvrSceneProvider` now derives `previousObjectToWorld` from the last world UBO camera position for chunks and WORLD-space entities.
+  - CAMERA and CAMERA_SHIFT entity transforms now use the last world UBO when it is available.
+  - This keeps motion-vector inputs native-side and avoids a Java/JNI contract extension for the first G-buffer milestone.
+- Texture descriptor safety:
+  - Added a native `DeferredRtModule` fallback texture path: a 1x1 white `R8G8B8A8_UNORM` image plus nearest-repeat sampler.
+  - The fallback image is uploaded during module build and transitioned to `SHADER_READ_ONLY_OPTIMAL`.
+  - Every frame descriptor table now initializes all 4096 texture-array slots to the fallback image before real `Textures::initializeTexture()` / sampler updates overwrite loaded slots.
+  - This avoids undefined sampling from unbound combined-image-sampler descriptors while preserving the current Java/JNI texture input contract.
+- Multiview fallback correction:
+  - Split the G-buffer vertex shader into a per-layer wrapper (`gbuffer.vert`) and a multiview wrapper (`gbuffer_multiview.vert`) over a shared `gbuffer_vertex_common.glsl`.
+  - The per-layer shader uses the push-constant `viewIndex`; the multiview shader uses `gl_ViewIndex` and is only attached to the multiview pipeline.
+  - Removed the unused multiview extension requirement from the fragment shader.
+  - Added `src/shader` to the shader include path and tracked deferred RT `.glsl` includes as shader dependencies.
+  - This keeps the non-multiview fallback path buildable and avoids making all G-buffer raster pipelines require multiview support.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after the fallback descriptor initialization change.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core -- /m:1 /p:CL_MPCount=1 /v:minimal` initially failed after the shader split due to missing include-extension and shader-root include path declarations; both issues were fixed, then the same command completed successfully.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 3/3 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed `gbuffer_vert.spv`, `gbuffer_multiview_vert.spv` and `gbuffer_frag.spv` to both `MCVR-custom/bin/res/world/deferred_rt` and `Radiance-custom/src/main/resources/shaders/world/deferred_rt`.
