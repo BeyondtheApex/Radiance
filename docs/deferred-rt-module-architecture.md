@@ -759,6 +759,24 @@ Reference mapping from current Minecraft/Blaze3D sources under `G:\cpp\radiance\
 
 Provider metadata must preserve enough of those facts to keep Deferred RT compatible with PT scene capture and with future Blaze3D-backed paths. It does not need to mirror Java classes one-for-one, and it must not expose those Java classes to shaderpack syntax.
 
+Current implemented ABI, as of Step 24:
+
+- Java realtime chunk/entity uploads use a versioned per-geometry `int` record:
+  - `version = 1`,
+  - `intStride = 14`,
+  - fields: alpha mode, blend mode, depth policy, cull mode, render-state flags, write mask, output target class, layering class, semantic flags, pipeline sort key, polygon offset factor, polygon offset units, stencil flags and one reserved word.
+- Old native upload entry points remain available. Replay and any old payload path that does not provide metadata is classified through the previous conservative fallback.
+- `SceneMaterialBinding` carries the parsed neutral `SceneRasterMetadata`, and `McvrSceneProvider` uses it to classify opaque, cutout, translucent, additive and overlay packets.
+- When no metadata is present, `WORLD_TRANSPARENT` still maps to `SceneGeometryClass::Cutout` for first G-buffer compatibility, and provider stats count this as `legacyTransparentCutoutFallbackPackets`.
+- The current Java adapter derives metadata from the public `RenderLayer.MultiPhase` fields that are available in this Minecraft/Yarn version (`texture`, `transparency`, `cull`, `isTranslucent()`) plus layer-name conventions. It is a compatibility bridge, not a full Blaze3D `RenderPipeline` mirror.
+- The compact record is per geometry/draw, not per vertex. It does not duplicate vertex buffers, material buffers, BLAS or TLAS preparation.
+
+Remaining adapter work:
+
+- Add a more exact Java-side adapter or mixin surface for depth test, depth write, write masks, output target, overlay/lightmap, outline/crumbling, layering and `sortOnUpload` instead of relying on layer-name inference.
+- Extend replay capture if offline replay needs to test metadata-sensitive transparency behavior. Current replay stays on the old payload path and intentionally exercises fallback classification.
+- Surface provider statistics in a debug overlay, log or offline runner so fallback classification is visible in real frames.
+
 Rules:
 
 - Shaderpacks see neutral content streams such as `world_opaque`, `world_cutout`, `entity_cutout`, `transparent_forward`, `text`, `weather` and `particle`.

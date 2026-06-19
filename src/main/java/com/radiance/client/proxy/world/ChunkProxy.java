@@ -324,6 +324,7 @@ public class ChunkProxy {
             ByteBuffer geometryTypeBB = null;
             ByteBuffer geometryGroupNameBB = null;
             ByteBuffer geometryTextureBB = null;
+            ByteBuffer rasterMetadataBB = null;
             ByteBuffer vertexFormatBB = null;
             ByteBuffer vertexCountBB = null;
             ByteBuffer verticesBB = null;
@@ -348,6 +349,11 @@ public class ChunkProxy {
                 long geometryTextureAddr = memAddress(geometryTextureBB);
                 int geometryTextureBaseAddr = 0;
 
+                int rasterMetadataSize = buffers.size() * Constants.RasterMetadata.INT_STRIDE * Integer.BYTES;
+                rasterMetadataBB = MemoryUtil.memAlloc(rasterMetadataSize);
+                long rasterMetadataAddr = memAddress(rasterMetadataBB);
+                int rasterMetadataBaseIndex = 0;
+
                 int vertexFormatSize = buffers.size() * Integer.BYTES;
                 vertexFormatBB = MemoryUtil.memAlloc(vertexFormatSize);
                 long vertexFormatAddr = memAddress(vertexFormatBB);
@@ -363,6 +369,7 @@ public class ChunkProxy {
                 long verticesAddr = memAddress(verticesBB);
                 int verticesBaseAddr = 0;
 
+                int[] rasterMetadata = new int[Constants.RasterMetadata.INT_STRIDE];
                 for (Map.Entry<RenderLayer, BuiltBuffer> entry : buffers.entrySet()) {
                     RenderLayer renderLayer = entry.getKey();
                     assert renderLayer.getDrawMode() == QUADS;
@@ -411,6 +418,12 @@ public class ChunkProxy {
                     geometryTextureBB.putInt(geometryTextureBaseAddr, geometryTextureID);
                     geometryTextureBaseAddr += Integer.BYTES;
 
+                    Constants.RasterMetadata.write(rasterMetadata, 0, renderLayer, true);
+                    for (int metadataValue : rasterMetadata) {
+                        rasterMetadataBB.putInt(rasterMetadataBaseIndex * Integer.BYTES, metadataValue);
+                        rasterMetadataBaseIndex++;
+                    }
+
                     vertexFormatBB.putInt(vertexFormatBaseAddr, vertexFormatID);
                     vertexFormatBaseAddr += Integer.BYTES;
 
@@ -442,7 +455,7 @@ public class ChunkProxy {
                         important,
                         replayGeometries));
                 }
-                rebuildSingle(builtChunk.getOrigin()
+                rebuildSingleWithRasterMetadata(builtChunk.getOrigin()
                         .getX(),
                     builtChunk.getOrigin()
                         .getY(),
@@ -453,6 +466,9 @@ public class ChunkProxy {
                     geometryTypeAddr,
                     geometryGroupNameAddr,
                     geometryTextureAddr,
+                    Constants.RasterMetadata.VERSION,
+                    rasterMetadataAddr,
+                    Constants.RasterMetadata.INT_STRIDE,
                     vertexFormatAddr,
                     vertexCountAddr,
                     verticesAddr,
@@ -466,6 +482,9 @@ public class ChunkProxy {
                 }
                 if (geometryTextureBB != null) {
                     MemoryUtil.memFree(geometryTextureBB);
+                }
+                if (rasterMetadataBB != null) {
+                    MemoryUtil.memFree(rasterMetadataBB);
                 }
                 if (vertexFormatBB != null) {
                     MemoryUtil.memFree(vertexFormatBB);
@@ -496,6 +515,22 @@ public class ChunkProxy {
         long geometryTypes,
         long geometryGroupNames,
         long geometryTextures,
+        long vertexFormats,
+        long vertexCounts,
+        long vertices,
+        boolean important);
+
+    private static native void rebuildSingleWithRasterMetadata(int originX,
+        int originY,
+        int originZ,
+        long index,
+        int size,
+        long geometryTypes,
+        long geometryGroupNames,
+        long geometryTextures,
+        int rasterMetadataVersion,
+        long rasterMetadata,
+        int rasterMetadataIntStride,
         long vertexFormats,
         long vertexCounts,
         long vertices,

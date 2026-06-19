@@ -865,6 +865,7 @@ public class EntityProxy {
         ByteBuffer geometryGroupNameBB = null;
         ByteBuffer geometryContentNameBB = null;
         ByteBuffer geometryTextureBB = null;
+        ByteBuffer rasterMetadataBB = null;
         ByteBuffer vertexFormatBB = null;
         ByteBuffer indexFormatBB = null;
         ByteBuffer vertexCountBB = null;
@@ -939,6 +940,12 @@ public class EntityProxy {
             long geometryTextureAddr = memAddress(geometryTextureBB);
             int geometryTextureBaseAddr = 0;
 
+            int rasterMetadataSize =
+                entityRenderDataList.getTotalLayersCount() * Constants.RasterMetadata.INT_STRIDE * Integer.BYTES;
+            rasterMetadataBB = MemoryUtil.memAlloc(rasterMetadataSize);
+            long rasterMetadataAddr = memAddress(rasterMetadataBB);
+            int rasterMetadataBaseIndex = 0;
+
             int vertexFormatSize = entityRenderDataList.getTotalLayersCount() * Integer.BYTES;
             vertexFormatBB = MemoryUtil.memAlloc(vertexFormatSize);
             long vertexFormatAddr = memAddress(vertexFormatBB);
@@ -963,6 +970,7 @@ public class EntityProxy {
                 List<EntityBuildCapture.LayerData> captureLayers = captureEntities == null
                     ? null
                     : new ArrayList<>(entityRenderData.size());
+                int[] rasterMetadata = new int[Constants.RasterMetadata.INT_STRIDE];
 
                 entityHashCodeBB.putInt(entityHashCodeBaseAddr, entityRenderData.hashCode);
                 entityHashCodeBaseAddr += Integer.BYTES;
@@ -1047,6 +1055,13 @@ public class EntityProxy {
                     geometryTextureBB.putInt(geometryTextureBaseAddr, geometryTextureID);
                     geometryTextureBaseAddr += Integer.BYTES;
 
+                    Constants.RasterMetadata.write(rasterMetadata, 0, renderLayer,
+                        entityRenderLayer.reflect);
+                    for (int metadataValue : rasterMetadata) {
+                        rasterMetadataBB.putInt(rasterMetadataBaseIndex * Integer.BYTES, metadataValue);
+                        rasterMetadataBaseIndex++;
+                    }
+
                     vertexFormatBB.putInt(vertexFormatBaseAddr, vertexFormatID);
                     vertexFormatBaseAddr += Integer.BYTES;
 
@@ -1096,7 +1111,7 @@ public class EntityProxy {
                     captureEntities));
             }
 
-            queueBuild(lineWidth,
+            queueBuildWithRasterMetadata(lineWidth,
                 coordinate.getValue(),
                 normalOffset,
                 entityRenderDataList.getTotalEntityCount(),
@@ -1113,6 +1128,9 @@ public class EntityProxy {
                 geometryGroupNameAddr,
                 geometryContentNameAddr,
                 geometryTextureAddr,
+                Constants.RasterMetadata.VERSION,
+                rasterMetadataAddr,
+                Constants.RasterMetadata.INT_STRIDE,
                 vertexFormatAddr,
                 indexFormatAddr,
                 vertexCountAddr,
@@ -1131,6 +1149,7 @@ public class EntityProxy {
             freeDirectBuffer(geometryGroupNameBB);
             freeDirectBuffer(geometryContentNameBB);
             freeDirectBuffer(geometryTextureBB);
+            freeDirectBuffer(rasterMetadataBB);
             freeDirectBuffer(vertexFormatBB);
             freeDirectBuffer(indexFormatBB);
             freeDirectBuffer(vertexCountBB);
@@ -1199,6 +1218,31 @@ public class EntityProxy {
         long geometryGroupNames,
         long geometryContentNames,
         long geometryTextures,
+        long vertexFormats,
+        long indexFormats,
+        long vertexCounts,
+        long vertices);
+
+    private static native void queueBuildWithRasterMetadata(float lineWidth,
+        int coordinate,
+        boolean normalOffset,
+        int size,
+        long entityHashCodes,
+        long entityPosXs,
+        long entityPosYs,
+        long entityPosZs,
+        long entityRayTracingFlags,
+        long entityPostRenderFlags,
+        long entityPrebuiltBLASs,
+        long entityPosts,
+        long entityLayerCounts,
+        long geometryTypes,
+        long geometryGroupNames,
+        long geometryContentNames,
+        long geometryTextures,
+        int rasterMetadataVersion,
+        long rasterMetadata,
+        int rasterMetadataIntStride,
         long vertexFormats,
         long indexFormats,
         long vertexCounts,

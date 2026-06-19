@@ -850,10 +850,9 @@ Status: in progress
 
 ### Step 24: Java/Native Raster Metadata Extension Design
 
-- Status: planned.
+- Status: completed.
 - Target files:
   - `Radiance-custom/src/main/java/com/radiance/client/constant/Constants.java`
-  - `Radiance-custom/src/main/java/com/radiance/client/vertex/PBRVertexConsumer.java`
   - `Radiance-custom/src/main/java/com/radiance/client/proxy/world/ChunkProxy.java`
   - `Radiance-custom/src/main/java/com/radiance/client/proxy/world/EntityProxy.java`
   - `MCVR-custom/src/core/middleware/com_radiance_client_proxy_world_ChunkProxy.cpp`
@@ -863,6 +862,9 @@ Status: in progress
   - `MCVR-custom/src/core/render/entities.hpp`
   - `MCVR-custom/src/core/render/entities.cpp`
   - `MCVR-custom/src/core/render/scene_provider/scene_provider.hpp`
+  - `MCVR-custom/src/core/render/scene_provider/scene_provider.cpp`
+  - `MCVR-custom/src/core/render/scene_provider/mcvr_scene_classification.hpp`
+  - `MCVR-custom/src/core/render/scene_provider/mcvr_scene_classification.cpp`
   - `MCVR-custom/src/core/render/scene_provider/mcvr_scene_provider.cpp`
   - `MCVR-custom/tests/deferred_rt_scene_provider_test.cpp`
   - `Radiance-custom/docs/deferred-rt-module-architecture.md`
@@ -898,9 +900,56 @@ Status: in progress
   - This step is a design/ABI step. It should not implement full transparent rendering, refraction or forward transparent compose.
   - Shaderpack syntax remains neutral. Do not expose Java `RenderLayer`, Blaze3D classes, PT SBT concepts or raw Vulkan state in deferred shaderpacks.
   - If metadata is missing, the provider must keep routing content through conservative defaults and emit diagnostics/counters for fallback classification.
-- Completion standard:
-  - The architecture document lists the current payload strengths, current limitations and the provider-side extension policy.
-  - Scene-provider tests cover old-payload fallback and extended-metadata classification for opaque, cutout and true translucent packets.
-  - Deferred RT can distinguish cutout from true translucent content when extended metadata is present, without changing public module outputs.
-  - The plan identifies `WorldPipeline` or a shared scene runtime as the final owner of `ScenePrepare`, rather than each module owning an independent instance.
-  - Debug counters or tests are planned for "one AS preparation per frame" when PT and Deferred RT coexist in the same diagnostic pipeline.
+- Implemented:
+  - Added native neutral raster metadata ABI:
+    - `SceneRasterMetadataCurrentVersion = 1`,
+    - `SceneRasterMetadataIntStride = 14`,
+    - alpha mode,
+    - blend mode,
+    - depth policy,
+    - cull mode,
+    - render-state flags,
+    - write mask,
+    - output target class,
+    - layering class,
+    - material semantic flags,
+    - pipeline sort key,
+    - polygon offset factor/units,
+    - stencil flags,
+    - one reserved word in the Java record.
+  - Extended `SceneMaterialBinding` with parsed `SceneRasterMetadata`.
+  - Added native helpers to parse fixed-stride Java `int` records and classify metadata as opaque, cutout, translucent, additive or overlay.
+  - Added overloaded MCVR classification helpers that prefer metadata when present and preserve the old `McvrGeometryType` fallback when missing.
+  - Added provider stats for:
+    - metadata packets,
+    - metadata translucent packets,
+    - legacy fallback packets,
+    - legacy `WORLD_TRANSPARENT -> Cutout` fallback packets.
+  - Extended `ChunkBuildTask`, `ChunkBuildData`, `ChunkRenderData`, `Chunk1`, `EntitiesBuildTask`, `EntityBuildData` and `Entity` to carry per-geometry metadata without touching vertex layout, material buffers or acceleration-structure buffers.
+  - Added new JNI realtime upload entry points:
+    - `ChunkProxy.rebuildSingleWithRasterMetadata(...)`,
+    - `EntityProxy.queueBuildWithRasterMetadata(...)`.
+  - Kept old native upload entry points for replay and old payload fallback:
+    - `ChunkProxy.rebuildSingle(...)`,
+    - `EntityProxy.queueBuild(...)`.
+  - Added `Constants.RasterMetadata` on the Java side as the single record writer and enum mirror for native metadata values.
+  - Realtime chunk/entity uploads now allocate one compact metadata int buffer and pass it beside existing geometry arrays.
+  - Current Java metadata mapping uses public `RenderLayer.MultiPhase` fields available in this Yarn version plus layer-name conventions. This is enough to distinguish common cutout, translucent, additive, overlay, weather/cloud/particle/text and water/glass/portal-like cases without exposing Java classes to shaderpacks.
+  - `McvrSceneProvider` now uses metadata to place true translucent/additive/overlay packets in the deferred-later translucent stream instead of treating all `WORLD_TRANSPARENT` as cutout.
+  - Extended `deferred_rt_scene_provider_test` to cover:
+    - old-payload `WORLD_TRANSPARENT -> Cutout` fallback,
+    - fallback diagnostics,
+    - metadata record unpacking,
+    - metadata opaque/cutout/translucent/additive/overlay classification,
+    - metadata material flags,
+    - metadata/fallback stats accumulation.
+  - Updated the architecture document with the implemented ABI, current Java adapter limitations and remaining adapter/replay/debug-overlay work.
+- Verification:
+  - `gradlew.bat classes` completed successfully in `Radiance-custom` and regenerated ignored JNI headers under `src/main/native/include`.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 5/5 tests passed.
+- Remaining work:
+  - Add a more exact Java adapter or mixin surface for depth test, depth write, write masks, output target, overlay/lightmap, outline/crumbling, layering and `sortOnUpload`; the current implementation still infers several of these from layer names.
+  - Extend replay capture if metadata-sensitive transparency behavior must be tested offline. Current replay intentionally remains on the old payload path and therefore exercises fallback classification.
+  - Surface provider stats in a debug overlay, log export or offline runner so real-frame fallback classification is visible.
+  - Implement the actual `transparent_forward` / refraction path. Step 24 only makes classification accurate enough to route true translucent content out of the opaque/cutout G-buffer.
