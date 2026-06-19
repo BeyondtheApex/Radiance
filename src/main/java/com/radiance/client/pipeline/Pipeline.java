@@ -1437,6 +1437,17 @@ public class Pipeline {
 
     public static native boolean isNativeRebuildActive();
 
+    public static native String getDeferredRtDiagnosticsOverlay();
+
+    public static String getDeferredRtDiagnosticsDebugText() {
+        try {
+            String diagnostics = getDeferredRtDiagnosticsOverlay();
+            return diagnostics == null ? "" : diagnostics.trim();
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
     private static String getCurrentLanguageCode() {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client != null) {

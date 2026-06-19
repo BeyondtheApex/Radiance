@@ -777,7 +777,8 @@ Remaining adapter work:
 - Extend replay capture if offline replay needs to test metadata-sensitive transparency behavior. Current replay stays on the old payload path and intentionally exercises fallback classification.
 - `DeferredRtModule::latestDiagnosticsSnapshot()` now provides a native, frame-latency-aware snapshot combining provider metadata/fallback stats, classification stats and lighting pass stats.
 - As of Step 26, `render_pipeline.module.deferred_rt.attribute.diagnostics_log` and `render_pipeline.module.deferred_rt.attribute.diagnostics_log_interval` expose a default-off native log path for that snapshot. The throttle is based on completed diagnostics snapshot sequence numbers rather than swapchain frame slots.
-- Remaining diagnostics work is to surface the same snapshot in an in-game debug overlay or future offline runner, and to add pass-specific transparent/refraction counters after `transparent_forward` exists.
+- As of Step 27, the same snapshot also has a compact native overlay formatter exposed through `Pipeline.getDeferredRtDiagnosticsOverlay()` and shown in the existing F3 debug text when a Deferred RT snapshot is valid.
+- Remaining diagnostics work is to add a dedicated in-game diagnostics UI or configurable overlay, feed the snapshot into the future offline runner/frame dump, and add pass-specific transparent/refraction counters after `transparent_forward` exists.
 
 Rules:
 

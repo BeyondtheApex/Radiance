@@ -1,6 +1,7 @@
 package com.radiance.mixins.vr_debug;
 
 import com.radiance.client.gui.VRPerformanceManager;
+import com.radiance.client.pipeline.Pipeline;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
@@ -58,6 +59,7 @@ public class DebugHudVRMixin {
             }
         }
 
+        addDeferredRtDiagnosticsText(debugText);
         cir.setReturnValue(debugText);
     }
 
@@ -93,5 +95,20 @@ public class DebugHudVRMixin {
         // - Render scale
         // - IPD settings
         // etc.
+    }
+
+    private void addDeferredRtDiagnosticsText(List<String> debugText) {
+        String diagnostics = Pipeline.getDeferredRtDiagnosticsDebugText();
+        if (diagnostics.isEmpty()) {
+            return;
+        }
+
+        debugText.add("");
+        debugText.add("§6Deferred RT:");
+        for (String line : diagnostics.split("\\R")) {
+            if (!line.isBlank()) {
+                debugText.add(line);
+            }
+        }
     }
 }

@@ -1044,3 +1044,38 @@ Status: in progress
   - Add an in-game diagnostics/debug overlay that reads the same snapshot without requiring log output.
   - Feed diagnostics into the future offline runner or scene-frame dump path so replay captures can preserve selected shaderpack, attributes and fallback classification.
   - Extend diagnostics after `transparent_forward` / refraction is implemented so routed translucent content has pass-specific counters instead of only provider routing counts.
+
+### Step 27: Deferred RT F3 Diagnostics Text
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_diagnostics.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_diagnostics.cpp`
+  - `MCVR-custom/src/core/middleware/com_radiance_client_pipeline_Pipeline.cpp`
+  - `MCVR-custom/tests/deferred_rt_diagnostics_test.cpp`
+  - `Radiance-custom/src/main/java/com/radiance/client/pipeline/Pipeline.java`
+  - `Radiance-custom/src/main/java/com/radiance/mixins/vr_debug/DebugHudVRMixin.java`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+- Reason for this step:
+  - Step 26 made diagnostics visible only through an opt-in native log path.
+  - Debugging real pipeline switching and provider fallback classification is easier if the current Deferred RT snapshot can be read from Java without enabling log spam.
+  - The first Java-visible diagnostics path should be read-only, lightweight and independent of PT modules.
+- Implemented:
+  - Added `formatDeferredRtDiagnosticsOverlay(...)`, a compact multi-line formatter for F3/debug text.
+  - Extended `deferred_rt_diagnostics_test` to cover overlay formatting and invalid-snapshot empty output.
+  - Added native JNI `Pipeline.getDeferredRtDiagnosticsOverlay()`:
+    - finds the active `DeferredRtModule` in the current native `WorldPipeline`,
+    - returns the compact overlay text for the latest valid snapshot,
+    - returns an empty string when native is not initialized, no Deferred RT module is active, or no snapshot is valid yet.
+  - Added Java wrapper `Pipeline.getDeferredRtDiagnosticsDebugText()` that catches native/runtime failures and returns an empty string for non-Deferred-RT paths.
+  - Extended the existing F3 debug text mixin to append a `Deferred RT` section only when diagnostics text is non-empty.
+- Verification:
+  - `gradlew.bat classes` completed successfully in `Radiance-custom` and regenerated ignored JNI headers under `src/main/native/include`.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 6/6 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed `core.dll` plus current shader resources.
+- Remaining work:
+  - Add a dedicated diagnostics UI or configurable overlay if the F3 text becomes too dense.
+  - Feed diagnostics into the future offline runner or scene-frame dump path.
+  - Extend diagnostics after `transparent_forward` / refraction exists so translucent work has pass-specific counters.
