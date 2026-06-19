@@ -165,6 +165,29 @@ Status: in progress
   - Deferred RT contract shell is buildable and has CPU contract coverage.
   - Ready for first milestone commit after staged diff review.
 
+### Step 8: Shared Scene Prepare Extraction
+
+- Status: completed.
+- Files:
+  - `MCVR-custom/src/core/render/scene_prepare/scene_prepare.hpp`
+  - `MCVR-custom/src/core/render/scene_prepare/scene_prepare.cpp`
+  - `MCVR-custom/src/core/render/modules/world/ray_tracing/ray_tracing_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/ray_tracing/ray_tracing_module.cpp`
+  - Removed old path: `MCVR-custom/src/core/render/modules/world/ray_tracing/submodules/world_prepare.*`
+- Implemented behavior:
+  - Moved PT-owned `WorldPrepare` into renderer-owned `ScenePrepare`.
+  - Removed the back-reference from scene preparation to `RayTracingModule`.
+  - Exposed `ScenePrepare::contexts()` through const and non-const accessors so later modules can consume prepared scene contexts without friend/private coupling.
+  - Kept RayTracing as the first consumer of the same TLAS/BLAS metadata, buffer-address tables, previous-position tables and hit-group list.
+- Design note:
+  - This is intentionally a no-rendering-behavior-change extraction. Deferred RT should consume `ScenePrepareContext` next, but the contract shell does not run it until a G-buffer/ray-query pass has a real use for the prepared scene.
+  - Existing scene inputs are enough for the next Deferred RT stages: world/entity geometry buffers, material buffer addresses, texture mapping buffer, world/last-world/sky uniforms, TLAS/BLAS metadata and previous-object transforms. Future adapter work is still needed for Blaze3D-style draw packets and raster draw ordering.
+- Verification:
+  - First `core` build after the file move reconfigured CMake, then MSBuild still tried to compile the removed old path `ray_tracing/submodules/world_prepare.cpp` from the stale project graph.
+  - Second `cmake --build MCVR-custom/build-radiance-custom --config Release --target core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after regenerated project files took effect.
+  - After adding the const context accessor, `cmake --build MCVR-custom/build-radiance-custom --config Release --target core shaders mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 1/1 tests passed.
+
 ## Open Issues
 
 - The first milestone does not implement G-buffer rasterization, ray-query lighting, scene provider extraction, deferred shaderpack runtime, or offline runner.
