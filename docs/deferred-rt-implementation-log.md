@@ -1240,3 +1240,69 @@ Status: in progress
   - Define the conflict strategy for graphs that contain both PT and Deferred RT with different explicit shaderpack paths.
   - Add a built-in `vanilla-deferred-rt` pack after fixed native passes have shaderpack-backed equivalents.
   - Add a lint/offline parser path so Deferred packs can be validated without launching Minecraft.
+
+### Step 31: Module-Scoped Shaderpack Compatibility
+
+- Status: completed.
+- Target files:
+  - `Radiance-custom/src/main/java/com/radiance/client/pipeline/Pipeline.java`
+  - `Radiance-custom/src/replayCli/java/com/radiance/replay/cli/ReplayDaemon.java`
+  - `Radiance-custom/src/main/resources/assets/radiance/lang/en_us.json`
+  - `Radiance-custom/src/main/resources/assets/radiance/lang/zh_cn.json`
+  - `MCVR-custom/src/core/render/pipeline.hpp`
+  - `MCVR-custom/src/core/render/pipeline.cpp`
+  - `MCVR-custom/src/core/render/modules/world/ray_tracing/ray_tracing_module.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_shaderpack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_shaderpack.cpp`
+  - `MCVR-custom/src/core/render/modules/world/post_render/post_render_module.cpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.cpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack_stage_contract.hpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack_stage_contract.cpp`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Step 30 made Deferred RT selectable as a shaderpack owner, but Java selection still treated shaderpacks too globally and native still kept one primary shared shaderpack runtime.
+  - A PT-only pack must not be assignable to Deferred RT, and a Deferred-only pack must not silently become the PT pack.
+  - Future graphs may contain both PT and Deferred RT or dynamically switch between them, so shaderpack compatibility has to be module/stage scoped before adding real Deferred pass execution.
+- Implemented:
+  - Added Java shaderpack stage inspection from `configs.json`:
+    - pass `stage` values,
+    - legacy PT default stage for untagged `full_screen`, `compute` and `ray_tracing` passes,
+    - `execution`, `execution_post`, `execution_deferred`,
+    - nested `execution.ray_tracing`, `execution.post_render` and `execution.deferred`.
+  - Extended `Pipeline.ShaderPackChoice` with immutable `stages`.
+  - Changed shaderpack list sorting so packs compatible with the current shaderpack owner appear before incompatible packs.
+  - Changed `isShaderPackSelectable(...)`, active detection and unavailability tooltips to evaluate the current shaderpack owner:
+    - PT requires `ray_tracing`,
+    - Deferred RT requires `deferred`,
+    - chunk-emission availability remains module-aware.
+  - Changed `setShaderPack(...)` so selection mutates only the current shaderpack owner module instead of writing the same path to every shaderpack-owning module.
+  - Added fallback for stored module shaderpack paths that no longer support the module's required stage.
+  - Added `stages` to replay daemon shaderpack listing output.
+  - Added English and Chinese UI tooltip strings for module-incompatible shaderpacks.
+  - Added native `ShaderPack::BuildConfig::requiredStage` and build-time validation:
+    - PT-loaded packs must contain `ray_tracing` content,
+    - Deferred-loaded packs must contain `deferred` content,
+    - Deferred empty path still means no shaderpack and is handled before loading.
+  - Changed `WorldPipeline` to store shaderpack runtimes by owning module and added `shaderPackForModule(...)`.
+  - Changed `RayTracingModule` and `DeferredRtModule` to read their own shaderpack runtime instead of whichever shared pack was loaded first.
+  - Kept `WorldPipeline::shaderPack()` as the primary runtime compatibility path for `PostRenderModule`; this preserves existing PT packs whose `post_render` stage is bundled with the PT pack.
+  - Completed the metadata shell for `ray_query`:
+    - added `PassConfig::Type::RayQuery`,
+    - added parser support for `type: ray_query`,
+    - allowed `ray_query` only in Deferred stage contract,
+    - counted `ray_query` in Deferred shaderpack inspection,
+    - made PT and PostRender reject `ray_query` clearly.
+- Verification:
+  - `gradlew.bat classes` completed successfully with `JAVA_HOME=C:\Program Files\Zulu\zulu-21`.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 8/8 tests passed.
+- Remaining work:
+  - Implement actual Deferred-stage command recording and execution. `ray_query` is only parsed/validated in this step.
+  - Add descriptor/resource binding and validation for Deferred shaderpack resources, including G-buffer images, public exports, scene draw streams and ray-query resources.
+  - Make PostRender shaderpack ownership explicit instead of relying on the primary world shaderpack runtime.
+  - Add tests or fixtures for Java shaderpack stage inspection once a Java-side test harness exists.
+  - Add a built-in `vanilla-deferred-rt` pack after fixed native Deferred passes are represented as shaderpack passes.
+  - Add an offline shaderpack lint/parser path for Deferred packs.

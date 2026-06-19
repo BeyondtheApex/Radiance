@@ -62,6 +62,7 @@
   "shader_pack_screen.title": "光影包",
   "shader_pack_screen.shader_settings": "Shader设置",
   "shader_pack_screen.unavailable_emission": "需要开启区块自发光收集",
+  "shader_pack_screen.unavailable_module": "当前管线模块不支持此光影包",
   "shader_pack_screen.empty": "未找到可用的 Radiance 光影包",
   "shader_pack_settings_screen.title": "Shader设置",
   "shader_pack.vanilla_pt": "Vanilla PT",

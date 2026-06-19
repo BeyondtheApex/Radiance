@@ -3039,15 +3039,31 @@ Goal: make the fixed pipeline user-customizable without exposing PT concepts or 
 
 #### 6.1 Extend shaderpack metadata
 
-Implementation status as of Step 30: partially complete. The shared loader now understands `stage: deferred`,
+Implementation status as of Step 31: partially complete. The shared loader now understands `stage: deferred`,
 `execution_deferred` and nested `execution.deferred`, and rejects Deferred-stage passes that try to use PT/SBT
-fields such as `rgen`, `hit_groups`, `rchit`, `rahit` or `query_sharc`. Java and native selection now support
-Deferred RT as a shaderpack owner through `render_pipeline.module.deferred_rt.attribute.shader_pack_path`.
-`DeferredRtModule` inspects the selected pack's Deferred stage and rejects execution commands that reference
-unknown Deferred passes.
+fields such as `rgen`, `hit_groups`, `rchit`, `rahit` or `query_sharc`. The loader also accepts `ray_query`
+as a Deferred-only pass kind for metadata and validation. Java and native selection now support Deferred RT as
+a shaderpack owner through `render_pipeline.module.deferred_rt.attribute.shader_pack_path`.
+`DeferredRtModule` inspects its selected pack's Deferred stage and rejects execution commands that reference
+unknown Deferred passes. Native shaderpack runtimes are stored by owning module so PT and Deferred RT can use
+different packs in the same graph.
 
 This is still a metadata, selection and validation shell only: Deferred RT still needs a runtime that consumes
 Deferred-stage passes and binds scene draw streams, G-buffer images and ray-query resources.
+
+Shaderpack selection is module-scoped:
+
+- `Presets.java` only defines preset identities. A preset persists module attribute overrides in `presetModules`.
+- Shaderpack path is a module attribute, not a global preset field.
+- PT uses `render_pipeline.module.ray_tracing.attribute.shader_pack_path`.
+- Deferred RT uses `render_pipeline.module.deferred_rt.attribute.shader_pack_path`.
+- A shaderpack selected for PT must expose `ray_tracing` stage content.
+- A shaderpack selected for Deferred RT must expose `deferred` stage content.
+- A single pack may expose both stages, but each module consumes only its own stage.
+- Empty PT path keeps the historical built-in `vanilla-pt` fallback.
+- Empty Deferred RT path means no Deferred shaderpack and the fixed native Deferred pipeline remains active.
+- `PostRenderModule` still follows the primary shaderpack runtime for compatibility with existing PT packs that include
+  `post_render` passes. A later registry step must make PostRender stage ownership explicit.
 
 Implementation steps:
 
@@ -3059,7 +3075,7 @@ Implementation steps:
   - `render`, metadata accepted in Step 29,
   - `compute`, metadata accepted in Step 29,
   - `full_screen`, metadata accepted in Step 29 for graphics and `compute_3d` backends,
-  - `ray_query`,
+  - `ray_query`, metadata accepted in Step 31,
   - optional `copy/resolve`.
 - Add resource kinds:
   - internal image,
@@ -3075,13 +3091,13 @@ Implementation steps:
   - SBT-style shader/hit fields, completed in Step 29,
   - PT hit groups, completed in Step 29.
 
-Remaining implementation steps after Step 30:
+Remaining implementation steps after Step 31:
 
 - Add real Deferred-stage runtime command recording in `DeferredRtModule`; the current fixed passes are still recorded by native code outside shaderpack execution.
 - Add descriptor/resource binding for shaderpack-declared Deferred-stage resources.
-- Add `ray_query` as a distinct pass kind instead of overloading generic compute metadata.
+- Implement `ray_query` execution in the Deferred runtime; Step 31 only adds parser/contract/inspection support.
 - Add resource validation for Deferred-stage internal images, public exports and scene draw streams.
-- Add explicit PT+Deferred shaderpack owner conflict handling for graphs that contain both modules.
+- Make PostRender shaderpack ownership explicit instead of implicitly following the primary world shaderpack runtime.
 - Add a shaderpack lint/offline parser tool that can validate a Deferred pack without launching Minecraft.
 - Add a minimal built-in `vanilla-deferred-rt` pack after the fixed G-buffer path has real runtime passes to move.
 
@@ -3089,8 +3105,8 @@ Completion standard:
 
 - A deferred pack can declare G-buffer, lighting and compose passes.
 - A pack using PT-only declarations fails before rendering with a clear error. The PT-only part is covered by Step 29,
-  and unknown Deferred execution pass references are covered by Step 30. Full resource/pass validation remains future
-  work.
+  unknown Deferred execution pass references are covered by Step 30, and module/stage compatibility is covered by
+  Step 31. Full resource/pass validation remains future work.
 
 #### 6.2 Add view/layer execution declarations
 

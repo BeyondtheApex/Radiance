@@ -145,6 +145,7 @@ final class ReplayDaemon implements AutoCloseable {
             out.add(Map.of("id", choice.id(), "displayName", choice.displayName(),
                 "relativePath", choice.relativePath(), "active", Pipeline.isShaderPackActive(choice),
                 "selectable", Pipeline.isShaderPackSelectable(choice),
+                "stages", choice.stages(),
                 "requiresEmission", Pipeline.shaderPackRequiresEmission(choice.relativePath())));
         }
         return ReplayJson.stringify(Map.of("shaderPacks", out));

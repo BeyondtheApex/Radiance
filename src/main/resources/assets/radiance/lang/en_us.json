@@ -62,6 +62,7 @@
   "shader_pack_screen.title": "Shader Pack",
   "shader_pack_screen.shader_settings": "Shader Settings",
   "shader_pack_screen.unavailable_emission": "Requires chunk emission collection",
+  "shader_pack_screen.unavailable_module": "Not supported by the current pipeline module",
   "shader_pack_screen.empty": "No Radiance shader packs found",
   "shader_pack_settings_screen.title": "Shader Settings",
   "shader_pack.vanilla_pt": "Vanilla PT",

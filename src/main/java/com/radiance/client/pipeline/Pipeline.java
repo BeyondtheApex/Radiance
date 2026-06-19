@@ -55,6 +55,9 @@ public class Pipeline {
     private static final String SHADER_PACK_MANIFEST_KEY = "radiance";
     private static final String SHADER_PACK_MANIFEST_TYPE_KEY = "shader_pack";
     private static final String SHADER_PACK_MANIFEST_DISPLAY_NAME_KEY = "display_name";
+    private static final String SHADER_PACK_STAGE_RAY_TRACING = "ray_tracing";
+    private static final String SHADER_PACK_STAGE_POST_RENDER = "post_render";
+    private static final String SHADER_PACK_STAGE_DEFERRED = "deferred";
     private static final String DLSS_MODULE_NAME = "render_pipeline.module.dlss.name";
     private static final String NRD_MODULE_NAME = "render_pipeline.module.nrd.name";
     private static final String TEMPORAL_ACCUMULATION_MODULE_NAME = "render_pipeline.module.temporal_accumulation.name";
@@ -73,7 +76,10 @@ public class Pipeline {
     private Pipeline() {
     }
 
-    public record ShaderPackChoice(String id, String displayName, String relativePath) {
+    public record ShaderPackChoice(String id, String displayName, String relativePath, Set<String> stages) {
+        public ShaderPackChoice {
+            stages = stages == null ? Set.of() : Set.copyOf(stages);
+        }
     }
 
     public static void initFolderPath(Path folderPath) {
@@ -304,7 +310,8 @@ public class Pipeline {
 
         List<ShaderPackChoice> shaderPacks = new ArrayList<>(discovered.values());
         shaderPacks.sort(Comparator
-                .<ShaderPackChoice, Boolean>comparing(choice -> !isInternalShaderPackChoice(choice))
+                .<ShaderPackChoice, Boolean>comparing(choice -> !isShaderPackSelectable(choice))
+                .thenComparing(choice -> !isInternalShaderPackChoice(choice))
                 .thenComparingInt(Pipeline::builtInShaderPackRank)
                 .thenComparing(choice -> choice.displayName().toLowerCase(Locale.ROOT))
                 .thenComparing(ShaderPackChoice::id));
@@ -369,6 +376,26 @@ public class Pipeline {
 
     private static boolean hasDefaultShaderPack(Module module) {
         return defaultShaderPackPath(module) != null && !defaultShaderPackPath(module).isBlank();
+    }
+
+    private static String shaderPackRequiredStage(Module module) {
+        if (module == null) {
+            return null;
+        }
+        if (Objects.equals(module.name, RAY_TRACING_MODULE_NAME)) {
+            return SHADER_PACK_STAGE_RAY_TRACING;
+        }
+        if (Objects.equals(module.name, DEFERRED_RT_MODULE_NAME)) {
+            return SHADER_PACK_STAGE_DEFERRED;
+        }
+        return null;
+    }
+
+    private static boolean shaderPackSupportsModule(ShaderPackChoice choice, Module module) {
+        String requiredStage = shaderPackRequiredStage(module);
+        return choice != null
+                && requiredStage != null
+                && choice.stages().contains(requiredStage);
     }
 
     public static boolean isRayTracingShaderPackPathAttribute(Module module, AttributeConfig attributeConfig) {
@@ -558,7 +585,8 @@ public class Pipeline {
 
         String configuredPath = toConfiguredShaderPackPath(normalizedPath);
         String displayName = readShaderPackDisplayName(normalizedPath, config);
-        return new ShaderPackChoice(normalizedPath.toString(), displayName, configuredPath);
+        Set<String> stages = readShaderPackStages(config);
+        return new ShaderPackChoice(normalizedPath.toString(), displayName, configuredPath, stages);
     }
 
     private static String toConfiguredShaderPackPath(Path shaderPackPath) {
@@ -666,6 +694,82 @@ public class Pipeline {
         return fallback;
     }
 
+    private static Set<String> readShaderPackStages(Object config) {
+        Set<String> stages = new HashSet<>();
+        if (!(config instanceof Map<?, ?> root)) {
+            return stages;
+        }
+
+        Object passes = root.get("passes");
+        if (passes instanceof Iterable<?> passList) {
+            for (Object pass : passList) {
+                if (!(pass instanceof Map<?, ?> passMap)) {
+                    continue;
+                }
+
+                String type = stringMapValue(passMap, "type");
+                String stage = normalizedShaderPackStage(stringMapValue(passMap, "stage"));
+                if (stage == null && ("full_screen".equals(type) || "compute".equals(type) || "ray_tracing".equals(type))) {
+                    stage = SHADER_PACK_STAGE_RAY_TRACING;
+                }
+                if (stage != null) {
+                    stages.add(stage);
+                }
+            }
+        }
+
+        readExecutionStages(root, stages);
+        if (stages.isEmpty() && root.containsKey("execution")) {
+            stages.add(SHADER_PACK_STAGE_RAY_TRACING);
+        }
+        if (root.containsKey("execution_post")) {
+            stages.add(SHADER_PACK_STAGE_POST_RENDER);
+        }
+        if (root.containsKey("execution_deferred")) {
+            stages.add(SHADER_PACK_STAGE_DEFERRED);
+        }
+
+        return stages;
+    }
+
+    private static void readExecutionStages(Map<?, ?> root, Set<String> stages) {
+        Object execution = root.get("execution");
+        if (!(execution instanceof Map<?, ?> executionMap)) {
+            return;
+        }
+
+        boolean hasNestedStages = false;
+        for (String stage : List.of(SHADER_PACK_STAGE_RAY_TRACING, SHADER_PACK_STAGE_POST_RENDER, SHADER_PACK_STAGE_DEFERRED)) {
+            if (executionMap.containsKey(stage)) {
+                stages.add(stage);
+                hasNestedStages = true;
+            }
+        }
+
+        if (!hasNestedStages
+                && (executionMap.containsKey("commands") || executionMap.containsKey("global_variables"))) {
+            stages.add(SHADER_PACK_STAGE_RAY_TRACING);
+        }
+    }
+
+    private static String stringMapValue(Map<?, ?> map, String key) {
+        Object value = map == null ? null : map.get(key);
+        if (value instanceof String string && !string.isBlank()) {
+            return string.trim().toLowerCase(Locale.ROOT);
+        }
+        return null;
+    }
+
+    private static String normalizedShaderPackStage(String stage) {
+        if (stage == null) {
+            return null;
+        }
+        return switch (stage) {
+            case SHADER_PACK_STAGE_RAY_TRACING, SHADER_PACK_STAGE_POST_RENDER, SHADER_PACK_STAGE_DEFERRED -> stage;
+            default -> null;
+        };
+    }
+
     private static String stripShaderPackExtension(String fileName) {
         if (fileName == null || fileName.isBlank()) {
             return "Shader Pack";
@@ -713,20 +817,38 @@ public class Pipeline {
     }
 
     public static boolean isShaderPackSelectable(ShaderPackChoice choice) {
-        return choice != null && (!shaderPackRequiresEmission(choice.relativePath()) || Options.collectChunkEmission);
+        Module module = getShaderPackModule();
+        return isShaderPackSelectable(module, choice);
+    }
+
+    private static boolean isShaderPackSelectable(Module module, ShaderPackChoice choice) {
+        return choice != null
+                && shaderPackSupportsModule(choice, module)
+                && (!shaderPackRequiresEmission(module, choice.relativePath()) || Options.collectChunkEmission);
     }
 
     public static String getShaderPackUnavailabilityReasonTranslationKey(ShaderPackChoice choice) {
         if (choice == null) {
             return null;
         }
-        if (shaderPackRequiresEmission(choice.relativePath()) && !Options.collectChunkEmission) {
+        Module module = getShaderPackModule();
+        if (!shaderPackSupportsModule(choice, module)) {
+            return "shader_pack_screen.unavailable_module";
+        }
+        if (shaderPackRequiresEmission(module, choice.relativePath()) && !Options.collectChunkEmission) {
             return "shader_pack_screen.unavailable_emission";
         }
         return null;
     }
 
     private static boolean isShaderPackValueSelectable(Module module, String configuredPath) {
+        String value = configuredPath == null ? "" : configuredPath.trim();
+        if (!value.isEmpty()) {
+            ShaderPackChoice choice = readShaderPackChoice(resolveShaderPackPath(module, value));
+            if (!shaderPackSupportsModule(choice, module)) {
+                return false;
+            }
+        }
         return !shaderPackRequiresEmission(module, configuredPath) || Options.collectChunkEmission;
     }
 
@@ -742,7 +864,8 @@ public class Pipeline {
             }
             shaderPackPath.value = defaultShaderPackPath(module);
             changed = true;
-            LOGGER.warn("Selected shader pack requires chunk emission collection. Falling back to the module default.");
+            LOGGER.warn("Selected shader pack is unavailable for module {}. Falling back to the module default.",
+                    module.name);
         }
         return changed;
     }
@@ -764,49 +887,45 @@ public class Pipeline {
             return false;
         }
 
-        boolean changed = false;
-        for (Module module : INSTANCE.modules) {
-            if (!isShaderPackModule(module)) {
-                continue;
-            }
-            AttributeConfig shaderPackPath = findAttribute(module, shaderPackPathAttributeName(module));
-            if (shaderPackPath == null || Objects.equals(shaderPackPath.value, choice.relativePath())) {
-                continue;
-            }
-            shaderPackPath.value = choice.relativePath();
-            getModuleAttributes(module);
-            changed = true;
+        Module module = getShaderPackModule();
+        if (module == null) {
+            return false;
         }
 
-        if (changed && rebuildNow) {
+        AttributeConfig shaderPackPath = findAttribute(module, shaderPackPathAttributeName(module));
+        if (shaderPackPath == null || Objects.equals(shaderPackPath.value, choice.relativePath())) {
+            return false;
+        }
+        shaderPackPath.value = choice.relativePath();
+        getModuleAttributes(module);
+
+        if (rebuildNow) {
             savePipeline();
             build();
         }
-        return changed;
+        return true;
     }
 
     public static boolean isShaderPackActive(ShaderPackChoice choice) {
         if (choice == null) {
             return false;
         }
-        for (Module module : INSTANCE.modules) {
-            if (!isShaderPackModule(module)) {
-                continue;
-            }
-            AttributeConfig shaderPackPath = findAttribute(module, shaderPackPathAttributeName(module));
-            String value = shaderPackPath == null || shaderPackPath.value == null ? "" : shaderPackPath.value.trim();
-            String defaultPath = defaultShaderPackPath(module);
-            if (value.isEmpty() && !defaultPath.isBlank() && Objects.equals(choice.relativePath(), defaultPath)) {
-                return true;
-            }
-            if (value.isEmpty()) {
-                return false;
-            }
-            Path current = resolveShaderPackPath(module, value);
-            Path candidate = resolveShaderPackPath(choice.relativePath());
-            return Objects.equals(current, candidate);
+        Module module = getShaderPackModule();
+        if (module == null) {
+            return false;
         }
-        return false;
+        AttributeConfig shaderPackPath = findAttribute(module, shaderPackPathAttributeName(module));
+        String value = shaderPackPath == null || shaderPackPath.value == null ? "" : shaderPackPath.value.trim();
+        String defaultPath = defaultShaderPackPath(module);
+        if (value.isEmpty() && !defaultPath.isBlank() && Objects.equals(choice.relativePath(), defaultPath)) {
+            return true;
+        }
+        if (value.isEmpty()) {
+            return false;
+        }
+        Path current = resolveShaderPackPath(module, value);
+        Path candidate = resolveShaderPackPath(choice.relativePath());
+        return Objects.equals(current, candidate);
     }
 
     public static void build() {
