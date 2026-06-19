@@ -668,3 +668,48 @@ Status: in progress
   - Add transparent/alpha-aware GI visibility and any-hit transmission.
   - Add tile/queue scheduling so diffuse GI is not full-resolution for every eligible pixel.
   - Validate `gi_hit_distance` against NRD in an actual denoiser preset after the Java preset wiring selects the explicit `gi_hit_distance` output.
+
+### Step 19: Classification GPU Statistics Foundation
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_classification.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_classification.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/shader/world/deferred_rt/classify.comp`
+  - `MCVR-custom/tests/deferred_rt_classification_test.cpp`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Intended behavior:
+  - Add a module-owned GPU storage buffer for classification counters.
+  - Count total classified pixels and per-path masks for valid primary, sky/background, direct light, diffuse GI, reflection and transparent/refraction eligibility.
+  - Clear counters at the start of the classification pass and update them from `classify.comp` with atomic adds.
+  - Keep Java/JNI unchanged; this is native debug/instrumentation data for later readback, debug UI and offline runner work.
+- Initial scope and limitations:
+  - This step creates and writes the GPU statistics source of truth but does not expose a Java UI or blocking CPU readback path yet.
+  - Counter reads for gameplay/debug overlay should be added after a safe frame-latency readback policy is chosen.
+  - The statistics are classification-path counters, not final dispatched-ray counters; later tile/queue scheduling should add pass-specific ray counters.
+- Substep 19.1 implemented:
+  - Added `DeferredRtClassificationStats` with eight packed `uint32_t` counters:
+    - total classified pixels,
+    - valid primary,
+    - sky/background,
+    - direct-light eligible,
+    - diffuse-GI eligible,
+    - specular/reflection eligible,
+    - transparent/refraction eligible,
+    - reserved.
+  - Added CPU helper functions to reset and accumulate the same counter layout used by the shader.
+  - Added one module-private device-local classification stats buffer per swapchain frame.
+  - Extended classification descriptor set 3 with binding 1 as a storage buffer for statistics.
+  - `render3D()` now clears the stats buffer with `vkCmdFillBuffer` before classification and synchronizes transfer writes before shader atomic writes.
+  - `classify.comp` now performs atomic counter increments when it writes each pixel's classification mask.
+  - Extended `deferred_rt_classification_test` to cover descriptor binding, counter layout, reset behavior and accumulation behavior.
+- Verification progress:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and regenerated `classify_comp.spv`.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 4/4 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed the updated `classify_comp.spv` to both `MCVR-custom/bin/res/world/deferred_rt` and `Radiance-custom/src/main/resources/shaders/world/deferred_rt`.
+- Remaining work:
+  - Add a safe frame-latency CPU readback path for the classification stats buffer.
+  - Surface the counters through a debug overlay/logging path without requiring Java/JNI changes unless a Java UI is explicitly needed.
+  - Add pass-specific counters for actual direct-light, reflection and GI ray-query work after tile/queue scheduling exists.
