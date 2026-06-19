@@ -471,3 +471,68 @@ Status: in progress
   - Add direct-light ray-query pass that consumes the classification mask and shared AS.
   - Feed reflection eligibility with real material roughness/specular data.
   - Add transparent/refraction primary handling before enabling the GPU refraction bit.
+
+### Step 15: Direct-Light Ray-Query Foundation
+
+- Status: in progress.
+- Target files:
+  - `MCVR-custom/src/core/vulkan/device.hpp`
+  - `MCVR-custom/src/core/vulkan/device.cpp`
+  - `MCVR-custom/src/core/vulkan/physical_device.hpp`
+  - `MCVR-custom/src/core/vulkan/physical_device.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/shader/world/deferred_rt/direct_light_ray_query.comp`
+  - `MCVR-custom/src/shader/world/deferred_rt/direct_light_fallback.comp`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Intended behavior:
+  - Add device-side `VK_KHR_ray_query` capability probing and conditional enablement.
+  - Add a deterministic direct-light compute pass after classification and before final compose.
+  - Use the shared TLAS/AS input when ray query is available; otherwise run an explicit non-ray fallback pass.
+  - Consume the classification mask and primary G-buffer outputs, then write `primary_direct_diffuse`.
+  - Keep Java/JNI unchanged for this milestone; all required inputs must come from the existing native scene provider, G-buffer, classification mask and world/render context.
+- Design constraints:
+  - Do not write a shader that assumes ray query support before Vulkan feature/extension plumbing exists.
+  - Keep the fallback path explicit and documented, so unsupported devices still get deterministic direct-light output without pretending RT visibility was evaluated.
+  - Compose should consume the direct-light output rather than duplicating hidden direct-light computation once this pass exists.
+- Current input-contract finding:
+  - `SceneProvider::accelerationData()` already exposes the per-frame TLAS plus AS metadata buffers from `ScenePrepareContext`.
+  - Step 15 can use the native scene provider boundary; no Java/JNI input change is required for direct-light bring-up.
+- Substep 15.1:
+  - Add optional `VK_KHR_ray_query` extension selection and `VkPhysicalDeviceRayQueryFeaturesKHR` enablement.
+  - Expose `vk::Device::hasRayQuery()` for module runtime selection between real ray-query visibility and fallback direct light.
+- Substep 15.1 implemented:
+  - `vk::Device` now includes `VK_KHR_ray_query` in the filtered extension candidate list.
+  - `VkPhysicalDeviceRayQueryFeaturesKHR` is queried and enabled only when the extension, feature and acceleration-structure feature are available.
+  - `vk::Device::hasRayQuery()` reports the enabled runtime capability for Deferred RT.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after a first timeout-only retry.
+- Substep 15.2:
+  - Add Deferred RT direct-light descriptor set/pipelines.
+  - Bind the per-frame TLAS when available.
+  - Dispatch either the ray-query shader or the explicit fallback shader between classification and compose.
+- Substep 15.2 implementation notes:
+  - Added module-private `DeferredRtDirectLightData` with light direction/radiance, ambient terms and capability flags.
+  - The direct-light pass derives current-frame sky direction from native `SkyUBO` when available and falls back to a deterministic sun-like direction otherwise.
+  - Added descriptor set 4:
+    - binding 0: TLAS for ray-query direct lighting,
+    - binding 1: `DeferredRtDirectLightData` UBO.
+  - Expanded `DeferredRtGBufferViewData` with inverse view/projection matrices so compute passes can reconstruct primary positions from the fixed G-buffer depth.
+  - Added explicit pass order target: `clear -> fixed G-buffer -> classification -> direct_light -> compose`.
+  - Compose now consumes `primary_direct_diffuse` instead of writing a duplicated fixed direct-light signal.
+- Current Step 15 limitations:
+  - The first ray-query shader is a hard-shadow visibility foundation. It does not yet evaluate transparent/alpha-test any-hit transmission.
+  - Direct light only covers the single sky-derived directional light. Area/restir light reservoirs, moon selection and volumetric cloud shadows remain later work.
+  - The fallback shader is intentionally unshadowed and is only used when ray query or a TLAS is unavailable.
+- Verification progress:
+  - First `shaders core` build re-ran CMake because shader globs changed, generated the new shader targets, then failed in C++ due to unqualified `DeferredRtDirectLightData` declarations in the module header.
+  - The type qualification was fixed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after that fix.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and generated `direct_light_fallback_comp.spv` plus `direct_light_ray_query_comp.spv`.
+  - After making the direct-light UBO shader layout explicitly `std140`, the same `shaders core mcvr_tests` build completed successfully again.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 4/4 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed `direct_light_fallback_comp.spv` plus `direct_light_ray_query_comp.spv` to both `MCVR-custom/bin/res/world/deferred_rt` and `Radiance-custom/src/main/resources/shaders/world/deferred_rt`.
+  - A pre-commit self-review found that sky-derived direct-light intensity was being applied twice; CPU-side direct-light data was corrected so `lightRadiance` stores color while `lightDirectionIntensity.w` stores intensity.
+  - After that correction, `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully again: 4/4 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully again after the final CPU-side intensity correction.
