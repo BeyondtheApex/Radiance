@@ -258,3 +258,37 @@ Status: in progress
 - Java preset support is intentionally not part of the first manual-test contract shell unless needed for compilation.
 - Shader clear defaults are placeholders. They are deterministic, but only valid for contract/resource testing, not rendering quality.
 - Manual pipeline outputs must be connected into the final output dependency graph; otherwise Java's topological build will omit unreferenced modules, as designed.
+
+### Step 11: Fixed G-buffer Plan Layer
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_gbuffer.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_gbuffer.cpp`
+  - `MCVR-custom/tests/deferred_rt_gbuffer_test.cpp`
+  - `MCVR-custom/tests/CMakeLists.txt`
+- Intended behavior:
+  - Add a CPU-testable plan for the first fixed G-buffer pass before touching Vulkan command recording.
+  - Define which Deferred RT public outputs are written by the opaque/cutout G-buffer pass.
+  - Define which outputs remain clear-pass placeholders until lighting, reflection, fog, refraction and GI passes are implemented.
+  - Keep layer/view rules compatible with the existing stereo array-output contract.
+- Notes:
+  - This layer is meant to be consumed by the Vulkan pass directly; it should prevent attachment order, output format and stereo layer decisions from becoming implicit in command recording code.
+- Implemented behavior:
+  - Added a first fixed G-buffer attachment contract for:
+    - `primary_albedo_metallic`
+    - `primary_specular_albedo`
+    - `primary_normal_roughness`
+    - `primary_motion_vector`
+    - `primary_linear_depth`
+    - `primary_depth`
+    - `primary_emission`
+  - Left radiance, reflection hit distance, direct/indirect/specular lighting, clear layer, fog, refraction and GI hit distance as explicit clear-only placeholders for later passes.
+  - Added mono, per-layer stereo and multiview layer planning helpers.
+  - Added draw-stream classification so opaque and cutout draw packets participate in the fixed G-buffer, while translucent/additive/overlay packets stay excluded.
+  - Cutout is marked as the only first-pass alpha-test draw stream.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 3/3 tests passed.
+- Deferred work:
+  - No Vulkan render pass, framebuffer, graphics pipeline or shader recording is connected yet; the new plan layer is ready for that implementation.
