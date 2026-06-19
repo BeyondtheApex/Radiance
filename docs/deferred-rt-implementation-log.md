@@ -713,3 +713,33 @@ Status: in progress
   - Add a safe frame-latency CPU readback path for the classification stats buffer.
   - Surface the counters through a debug overlay/logging path without requiring Java/JNI changes unless a Java UI is explicitly needed.
   - Add pass-specific counters for actual direct-light, reflection and GI ray-query work after tile/queue scheduling exists.
+
+### Step 20: Classification Statistics Readback Snapshot
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Intended behavior:
+  - Copy the classification stats GPU buffer to its persistent staging buffer after the classification pass.
+  - Read the completed staging data when the same swapchain frame slot is acquired again after its fence has completed.
+  - Expose the latest native `DeferredRtClassificationStats` snapshot through a module API for future debug overlay/offline-runner use.
+  - Keep Java/JNI unchanged.
+- Initial scope and limitations:
+  - This step exposes a native CPU snapshot only; it does not add UI text, Java bindings or an overlay.
+  - The snapshot is frame-latency based and may represent the latest completed frame slot rather than the frame currently being recorded.
+  - Pass-specific ray counters remain separate future work.
+- Substep 20.1 implemented:
+  - Added `DeferredRtModule::latestClassificationStats()` as a native accessor for the most recent completed stats snapshot.
+  - Added `captureCompletedClassificationStats(frameIndex)` to read a frame slot's persistent staging buffer after the framework has waited for that slot's fence.
+  - `render3D()` now captures the completed snapshot before reusing the frame slot.
+  - After `renderClassificationPass()`, the command stream synchronizes classification shader writes to transfer read and copies the stats device buffer into its staging buffer.
+  - The copy is non-blocking for the current frame; CPU reads happen only when that frame slot is acquired again after completion.
+- Verification progress:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 4/4 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed the updated `core.dll` to both `MCVR-custom/bin` and `Radiance-custom/src/main/resources`.
+- Remaining work:
+  - Add a native debug overlay/log line or offline-runner report that consumes `latestClassificationStats()`.
+  - Add pass-specific ray counters once direct-light/reflection/GI scheduling becomes queue/tile based.
