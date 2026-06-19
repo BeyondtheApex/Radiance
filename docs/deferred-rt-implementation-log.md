@@ -794,7 +794,7 @@ Status: in progress
 
 ### Step 23: Lighting Pass GPU Statistics
 
-- Status: in progress.
+- Status: completed.
 - Target files:
   - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_pass_stats.hpp`
   - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_pass_stats.cpp`
@@ -821,8 +821,32 @@ Status: in progress
 - Initial scope and limitations:
   - This step exposes native CPU snapshots only; no Java debug overlay or UI is added.
   - These are pass-level counters, not compacted/tiled queue counters. Later tile/queue scheduling can either refine these counters or add queue-specific counters.
-- Verification progress:
-  - Implementation in progress; build and CTest pending.
+- Implemented:
+  - Added `DeferredRtPassStats` with eighteen packed `uint32_t` counters:
+    - direct-light in-bounds, eligible, ray queries, occluded and lit pixels,
+    - reflection in-bounds, eligible, ray queries, ray hits, ray misses and fallback pixels,
+    - GI in-bounds, eligible, ray queries, ray hits, ray misses and fallback pixels,
+    - one reserved counter for ABI-compatible extension.
+  - Added CPU helpers and `deferred_rt_pass_stats_test` to lock the packed layout, reset behavior and accumulation semantics.
+  - Added one module-owned per-frame pass-stats `DeviceLocalBuffer` with persistent staging, following the classification-stats frame-latency readback pattern.
+  - Added `DeferredRtModule::latestPassStats()` as a native CPU snapshot accessor. No Java/JNI ABI change was made.
+  - Bound the same pass-stats SSBO into the lighting descriptor sets:
+    - set 4 binding 2 for direct light,
+    - set 5 binding 2 for reflection,
+    - set 6 binding 2 for GI.
+  - Added `pass_stats_common.glsl` and atomic counter writes in direct-light, reflection and GI fallback/ray-query shaders.
+  - Ray-query counters only increment when the shader has a TLAS flag and actually enters the trace path; fallback counters only increment for eligible fallback-produced reflection/GI pixels.
+  - Pass stats are cleared after classification and before lighting, made visible to compute shaders, then copied to staging after the GI pass for next-frame CPU readback.
+- Verification:
+  - First build attempt failed before compiling project changes because `glslangValidator.exe` was not on the PowerShell `PATH`.
+  - Retried with `D:\VulkanSDK\1.4.335.0\Bin` prepended to `PATH`.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 5/5 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed updated Deferred RT lighting shaders plus `core.dll` to the native bin and Java resource outputs.
+- Remaining work:
+  - Add a debug overlay, native log export or offline-runner report that consumes `latestPassStats()`.
+  - Replace or gate per-pixel atomic instrumentation if it shows measurable runtime cost in normal gameplay; queue/tile scheduling should eventually provide lower-overhead counters.
+  - Add an in-game smoke test or RenderDoc capture check once Deferred RT preset wiring can exercise the full path without manual graph setup.
 
 ### Step 24: Java/Native Raster Metadata Extension Design
 
