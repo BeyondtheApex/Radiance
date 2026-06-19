@@ -536,3 +536,46 @@ Status: in progress
   - After that correction, `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
   - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully again: 4/4 tests passed.
   - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully again after the final CPU-side intensity correction.
+
+### Step 16: G-Buffer Material Refinement
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/shader/world/deferred_rt/gbuffer.frag`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Intended behavior:
+  - Bind the existing native `vk::Data::TextureMapping` buffer into the Deferred RT G-buffer path.
+  - Decode LabPBR specular/normal auxiliary textures when Java/resource-pack texture mapping provides them.
+  - Replace placeholder G-buffer roughness, metallic and specular-albedo output with material-derived values.
+  - Keep the base albedo, cutout alpha test and existing direct-light/compose pass order unchanged.
+- Input-contract conclusion:
+  - No Java/JNI change is required for this step.
+  - The required inputs already exist in native form:
+    - sampled texture array through Deferred RT descriptor set 1,
+    - `Renderer::buffers()->textureMappingBuffer()` through the existing buffer upload path,
+    - `MaterialVertex.textureID`, `MaterialVertex.textureUV`, `MaterialVertex.packedData`, and draw material fallback texture ID through the current scene provider/G-buffer draw stream.
+- Descriptor plan:
+  - Extend Deferred RT descriptor set 2 with binding 2 as a read-only storage buffer for `TextureMapping`.
+  - Keep set 1 dedicated to the combined-image-sampler texture array.
+  - Bind the buffer in `bindGBufferResources()` so the per-frame upload cadence follows the existing buffer subsystem.
+- Known limitations to preserve explicitly:
+  - The first material refinement can use LabPBR normal maps for shading normal only when a stable screen-space derivative tangent basis is valid in the fragment shader.
+  - Height-map/parallax tracing is not part of this step; it remains owned by the later ray/reflection path.
+  - Transparent/refraction primaries are still not enabled just by material decoding.
+- Substep 16.1 implemented:
+  - Added a module-private fallback `TextureMapping` storage buffer with all entries initialized to `-1`.
+  - Extended Deferred RT descriptor set 2 with binding 2 for the read-only texture mapping storage buffer.
+  - `bindGBufferResources()` now binds the real `Renderer::buffers()->textureMappingBuffer()` when Java/native upload has provided one, otherwise binds the fallback buffer so the G-buffer descriptor is never left unbound.
+  - `gbuffer.frag` now samples mapped LabPBR specular and normal textures, converts them through `convertLabPBRMaterial()`, writes material roughness/metallic/F0, and applies a derivative-built tangent frame for normal-map shading normals.
+  - Base emission now uses LabPBR specular alpha when available while preserving the existing native emissive material flag behavior.
+  - A self-review corrected `primary_albedo_metallic.rgb` back to the contract-compatible base albedo output instead of zeroing metallic diffuse. Metallic behavior is now represented through the metallic channel plus F0/specular albedo, matching the existing PT material-guide convention.
+- Verification progress:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and regenerated `gbuffer_frag.spv`.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully after the material-output correction.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 4/4 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed the regenerated `gbuffer_frag.spv` to both `MCVR-custom/bin/res/world/deferred_rt` and `Radiance-custom/src/main/resources/shaders/world/deferred_rt`.
+- Remaining work:
+  - Add a runtime GPU readback/debug fixture for material/classification masks.
+  - Validate tangent-frame normal-map orientation against representative LabPBR resource packs in a captured frame.
+  - Reflection and GI passes still need to consume the now-populated roughness/F0/metallic data.
