@@ -98,12 +98,17 @@ The module is independent from the existing `RayTracingModule`, but it should re
 - post-render integration,
 - NRD/upscaler/temporal-compatible output buffers where possible.
 
-Current implementation note as of Step 29:
+Current implementation note as of Step 30:
 
 - `ShaderPackLoader` has a third metadata stage, `stage: deferred`.
 - The loader accepts both `execution_deferred` and nested `execution.deferred`.
-- Deferred-stage passes can be represented in the shared pass list, but `DeferredRtModule` does not yet record them.
 - A lightweight stage-contract helper rejects PT/SBT declarations for Deferred-stage passes before runtime setup.
+- Java shaderpack selection now routes through the active shaderpack owner instead of being hard-coded to PT.
+- PT keeps the historical default: an empty path means built-in `vanilla-pt.zip` and external pack failures may fall back to it.
+- Deferred RT has its own `render_pipeline.module.deferred_rt.attribute.shader_pack_path`; an empty path means no shaderpack and no PT fallback.
+- `WorldPipeline` can load a shared `ShaderPack` for Deferred RT when that Deferred path is explicit.
+- `DeferredRtModule` inspects the shared pack's Deferred stage, validates that Deferred execution pass commands reference known Deferred-stage passes, and exposes the summary in diagnostics text.
+- Deferred-stage passes can be represented in the shared pass list, but `DeferredRtModule` does not yet record or execute them.
 - Existing PT and PostRender shaderpacks continue to use the same loader and execution model.
 
 ---
@@ -480,7 +485,30 @@ The existing PT presets remain unchanged. That is intentional: PT still uses its
 
 The preset UI enumerates available `Presets` values through `Pipeline.isPresetAvailable(...)`; adding a new preset should require one enum entry, availability rules, graph assembly, and translation keys. The default/fallback order still prefers the stable PT presets first, then falls back to Deferred RT presets if PT paths are unavailable. This prevents existing configs from silently moving to the experimental raster path while still allowing explicit dynamic switching between PT and Deferred RT.
 
-### 4.9 VR / Layered Output Contract
+### 4.9 Shaderpack Selection Interface
+
+Java and native shaderpack selection are shared structurally, but the module owner decides the default and fallback policy.
+
+Current implemented owner policy as of Step 30:
+
+| Owner module | Path attribute | Empty path means | Built-in fallback |
+|---|---|---|---|
+| `ray_tracing` | `render_pipeline.module.ray_tracing.attribute.shader_pack_path` | built-in `shaders/world/ray_tracing/vanilla-pt.zip` | yes, preserves existing PT behavior |
+| `deferred_rt` | `render_pipeline.module.deferred_rt.attribute.shader_pack_path` | no Deferred shaderpack loaded | no, explicit Deferred pack errors must not silently become PT |
+
+`Pipeline.getShaderPackModule()` returns the active shaderpack-owning module for the current graph and `ShaderPackSettingsScreen` reads dynamic attributes from that owner. Deferred RT's empty default path returns no dynamic shaderpack attributes, so the default Deferred presets do not pay for PT pack parsing or metadata requests. If the user selects an explicit Deferred pack, Java sends the Deferred path attribute through the same native `Pipeline.getAttributes(...)` bridge and `DeferredRtModule::getAttributes(...)` reads only that pack's declared attributes/translations.
+
+Native `WorldPipeline` builds one shared `ShaderPack` instance from the first module that provides a shaderpack config. PT always provides one through its default path. Deferred RT provides one only when its path is non-empty. `DeferredRtModule::loadShaderPack()` then inspects the shared pack's `stage: deferred` metadata before normal resource initialization.
+
+This is a selection and validation shell, not the final Deferred shaderpack runtime. It intentionally keeps current fixed Deferred RT passes unchanged until resource binding, view/layer execution and pass recording are implemented.
+
+Open follow-ups:
+
+- Define a conflict strategy if a debug or transition graph contains both PT and Deferred RT with different explicit shaderpack paths.
+- Decide whether the long-term runtime should keep one shared pack object or split per-owner shaderpack runtime state while sharing loader/cache data.
+- Add a built-in `vanilla-deferred-rt` pack only after the fixed G-buffer and lighting passes have metadata-backed runtime equivalents.
+
+### 4.10 VR / Layered Output Contract
 
 `MCVR-custom` already has a stereo execution model:
 
@@ -3011,16 +3039,22 @@ Goal: make the fixed pipeline user-customizable without exposing PT concepts or 
 
 #### 6.1 Extend shaderpack metadata
 
-Implementation status as of Step 29: partially complete. The shared loader now understands `stage: deferred`,
+Implementation status as of Step 30: partially complete. The shared loader now understands `stage: deferred`,
 `execution_deferred` and nested `execution.deferred`, and rejects Deferred-stage passes that try to use PT/SBT
-fields such as `rgen`, `hit_groups`, `rchit`, `rahit` or `query_sharc`. This is a metadata/parser foundation only:
-Deferred RT still needs a runtime that consumes Deferred-stage passes and binds scene draw streams, G-buffer images
-and ray-query resources.
+fields such as `rgen`, `hit_groups`, `rchit`, `rahit` or `query_sharc`. Java and native selection now support
+Deferred RT as a shaderpack owner through `render_pipeline.module.deferred_rt.attribute.shader_pack_path`.
+`DeferredRtModule` inspects the selected pack's Deferred stage and rejects execution commands that reference
+unknown Deferred passes.
+
+This is still a metadata, selection and validation shell only: Deferred RT still needs a runtime that consumes
+Deferred-stage passes and binds scene draw streams, G-buffer images and ray-query resources.
 
 Implementation steps:
 
 - Add `stage: deferred`. Completed in Step 29.
 - Add `execution_deferred`. Completed in Step 29.
+- Add Deferred shaderpack selection and dynamic attribute routing. Completed in Step 30.
+- Add Deferred shaderpack inspection/validation in `DeferredRtModule`. Completed in Step 30 for duplicate/unknown pass references.
 - Add pass kinds:
   - `render`, metadata accepted in Step 29,
   - `compute`, metadata accepted in Step 29,
@@ -3041,19 +3075,22 @@ Implementation steps:
   - SBT-style shader/hit fields, completed in Step 29,
   - PT hit groups, completed in Step 29.
 
-Remaining implementation steps after Step 29:
+Remaining implementation steps after Step 30:
 
+- Add real Deferred-stage runtime command recording in `DeferredRtModule`; the current fixed passes are still recorded by native code outside shaderpack execution.
+- Add descriptor/resource binding for shaderpack-declared Deferred-stage resources.
 - Add `ray_query` as a distinct pass kind instead of overloading generic compute metadata.
-- Add Deferred-stage runtime command recording in `DeferredRtModule`.
 - Add resource validation for Deferred-stage internal images, public exports and scene draw streams.
+- Add explicit PT+Deferred shaderpack owner conflict handling for graphs that contain both modules.
 - Add a shaderpack lint/offline parser tool that can validate a Deferred pack without launching Minecraft.
 - Add a minimal built-in `vanilla-deferred-rt` pack after the fixed G-buffer path has real runtime passes to move.
 
 Completion standard:
 
 - A deferred pack can declare G-buffer, lighting and compose passes.
-- A pack using PT-only declarations fails before rendering with a clear error. The PT-only part is covered by Step 29;
-  full resource/pass validation remains future work.
+- A pack using PT-only declarations fails before rendering with a clear error. The PT-only part is covered by Step 29,
+  and unknown Deferred execution pass references are covered by Step 30. Full resource/pass validation remains future
+  work.
 
 #### 6.2 Add view/layer execution declarations
 

@@ -47,8 +47,8 @@ public class ShaderPackSettingsScreen extends Screen {
                 .build());
 
         rows.clear();
-        module = Pipeline.getRayTracingModule();
-        List<AttributeConfig> list = Pipeline.getRayTracingShaderPackAttributes();
+        module = Pipeline.getShaderPackModule();
+        List<AttributeConfig> list = Pipeline.getShaderPackAttributes();
         if (module == null || list.isEmpty()) {
             return;
         }

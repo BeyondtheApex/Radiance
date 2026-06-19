@@ -1179,3 +1179,64 @@ Status: in progress
   - Add Deferred resource validation for internal G-buffer images, public exports, scene draw streams and ray-query resources.
   - Add a shaderpack lint/offline parser tool so Deferred packs can be validated without launching Minecraft.
   - Add a minimal built-in `vanilla-deferred-rt` pack once fixed G-buffer and lighting runtime passes are ready to move into shaderpack metadata.
+
+### Step 30: Deferred Shaderpack Selection and Validation Shell
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_shaderpack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_shaderpack.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.cpp`
+  - `MCVR-custom/src/core/render/pipeline.cpp`
+  - `MCVR-custom/src/core/middleware/com_radiance_client_pipeline_Pipeline.cpp`
+  - `MCVR-custom/tests/deferred_rt_shaderpack_test.cpp`
+  - `MCVR-custom/tests/CMakeLists.txt`
+  - `Radiance-custom/src/main/resources/modules/deferred_rt.yaml`
+  - `Radiance-custom/src/main/java/com/radiance/client/pipeline/Pipeline.java`
+  - `Radiance-custom/src/main/java/com/radiance/client/gui/ShaderPackSettingsScreen.java`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Step 29 added Deferred shaderpack metadata, but the runtime still had no way to choose a Deferred pack from Java or validate the selected pack inside `DeferredRtModule`.
+  - The shaderpack UI and dynamic attribute path were still PT-oriented. Deferred RT needs the same structure without inheriting PT's built-in `vanilla-pt` fallback.
+  - Default Deferred RT presets must not load or parse the PT pack when no Deferred shaderpack is selected.
+- Implemented:
+  - Added `render_pipeline.module.deferred_rt.attribute.shader_pack_path` to `deferred_rt.yaml`.
+  - Generalized Java shaderpack-owner helpers:
+    - `getShaderPackModule()`,
+    - `getShaderPackAttributes()`,
+    - `isShaderPackAttribute(...)`,
+    - module-aware path/default handling for PT vs Deferred RT.
+  - Updated `ShaderPackSettingsScreen` to query the active shaderpack owner instead of hard-coding the PT module.
+  - Preserved PT behavior: empty PT path still means built-in `shaders/world/ray_tracing/vanilla-pt.zip`, and built-in fallback remains enabled for PT.
+  - Added Deferred behavior: empty Deferred path means no shaderpack, no native dynamic attribute query, and no PT fallback.
+  - Added `ShaderPack::BuildConfig::allowBuiltInFallback` and extended `ShaderPackLoader::load(...)` so external Deferred pack failures do not silently become `vanilla-pt`.
+  - Added `ShaderPack::buildConfigFromDeferredRtAttributes(...)` with `shouldUseSharc = false` and `allowBuiltInFallback = false`.
+  - Changed `WorldPipeline` shared shaderpack selection to load from the first shaderpack-owning module:
+    - PT always participates through its existing default,
+    - Deferred RT participates only when its path attribute is non-empty.
+  - Added `DeferredRtShaderPackInspection` and `inspectDeferredShaderPack(...)`:
+    - counts Deferred-stage render, compute and full-screen passes,
+    - counts execution commands, pass commands and variables,
+    - rejects duplicate/empty Deferred pass names,
+    - rejects Deferred execution pass commands that reference unknown Deferred-stage passes.
+  - `DeferredRtModule::loadShaderPack()` now inspects the shared shaderpack during build, throws on invalid Deferred metadata, and logs a compact `[DeferredRT] deferred shaderpack: ...` summary when a Deferred stage is present.
+  - `Pipeline.getDeferredRtDiagnosticsOverlay()` now appends the Deferred shaderpack inspection summary when available.
+  - Added native `DeferredRtModule::getAttributes(...)` so Java can read dynamic attributes/translations from an explicit Deferred pack.
+  - Added `deferred_rt_shaderpack_test` and wired it into `mcvr_tests`.
+  - Updated the architecture document with the Step 30 shaderpack owner policy and remaining runtime work.
+- Verification:
+  - `gradlew.bat classes` completed successfully with `JAVA_HOME=C:\Program Files\Zulu\zulu-21`.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 8/8 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed the updated `core.dll` plus shader resources.
+- Remaining work:
+  - Implement real Deferred-stage runtime pass recording. Current fixed G-buffer, classification, lighting and compose passes still run from native code outside shaderpack execution.
+  - Add descriptor/resource binding and validation for Deferred shaderpack resources, including internal G-buffer images, public exports, scene draw streams and ray-query resources.
+  - Add `ray_query` as a distinct Deferred pass kind instead of treating first metadata as generic compute.
+  - Define the conflict strategy for graphs that contain both PT and Deferred RT with different explicit shaderpack paths.
+  - Add a built-in `vanilla-deferred-rt` pack after fixed native passes have shaderpack-backed equivalents.
+  - Add a lint/offline parser path so Deferred packs can be validated without launching Minecraft.

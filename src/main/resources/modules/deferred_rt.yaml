@@ -34,6 +34,9 @@ outputImageConfigs:
   - name: "gi_hit_distance"
     format: "R16_SFLOAT"
 attributeConfigs:
+  - name: "render_pipeline.module.deferred_rt.attribute.shader_pack_path"
+    type: "string"
+    value: ""
   - name: "render_pipeline.module.deferred_rt.attribute.diagnostics_log"
     type: "bool"
     value: "render_pipeline.false"

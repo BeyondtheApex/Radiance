@@ -45,6 +45,7 @@ public class Pipeline {
     private static final String RAY_TRACING_MODULE_NAME = "render_pipeline.module.ray_tracing.name";
     private static final String DEFERRED_RT_MODULE_NAME = "render_pipeline.module.deferred_rt.name";
     private static final String RAY_TRACING_SHADER_PACK_PATH_ATTRIBUTE = "render_pipeline.module.ray_tracing.attribute.shader_pack_path";
+    private static final String DEFERRED_RT_SHADER_PACK_PATH_ATTRIBUTE = "render_pipeline.module.deferred_rt.attribute.shader_pack_path";
     private static final String VANILLA_RAY_TRACING_SHADER_PACK_PATH = "shaders/world/ray_tracing/vanilla-pt.zip";
     private static final String RESTIR_RAY_TRACING_SHADER_PACK_PATH = "shaders/world/ray_tracing/restir-di.zip";
     private static final String INTERNAL_RAY_TRACING_SHADER_PACK_PATH = VANILLA_RAY_TRACING_SHADER_PACK_PATH;
@@ -331,32 +332,88 @@ public class Pipeline {
         return null;
     }
 
+    public static Module getShaderPackModule() {
+        for (Module module : INSTANCE.modules) {
+            if (isShaderPackModule(module)) {
+                return module;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isShaderPackModule(Module module) {
+        return module != null
+                && (Objects.equals(module.name, RAY_TRACING_MODULE_NAME)
+                || Objects.equals(module.name, DEFERRED_RT_MODULE_NAME));
+    }
+
+    private static String shaderPackPathAttributeName(Module module) {
+        if (module == null) {
+            return null;
+        }
+        if (Objects.equals(module.name, RAY_TRACING_MODULE_NAME)) {
+            return RAY_TRACING_SHADER_PACK_PATH_ATTRIBUTE;
+        }
+        if (Objects.equals(module.name, DEFERRED_RT_MODULE_NAME)) {
+            return DEFERRED_RT_SHADER_PACK_PATH_ATTRIBUTE;
+        }
+        return null;
+    }
+
+    private static String defaultShaderPackPath(Module module) {
+        if (module != null && Objects.equals(module.name, RAY_TRACING_MODULE_NAME)) {
+            return VANILLA_RAY_TRACING_SHADER_PACK_PATH;
+        }
+        return "";
+    }
+
+    private static boolean hasDefaultShaderPack(Module module) {
+        return defaultShaderPackPath(module) != null && !defaultShaderPackPath(module).isBlank();
+    }
+
     public static boolean isRayTracingShaderPackPathAttribute(Module module, AttributeConfig attributeConfig) {
+        return isShaderPackPathAttribute(module, attributeConfig);
+    }
+
+    public static boolean isShaderPackPathAttribute(Module module, AttributeConfig attributeConfig) {
+        String pathAttributeName = shaderPackPathAttributeName(module);
         return module != null
                 && attributeConfig != null
-                && Objects.equals(module.name, RAY_TRACING_MODULE_NAME)
-                && Objects.equals(attributeConfig.name, RAY_TRACING_SHADER_PACK_PATH_ATTRIBUTE);
+                && pathAttributeName != null
+                && Objects.equals(attributeConfig.name, pathAttributeName);
     }
 
     public static boolean isRayTracingShaderPackAttribute(Module module, AttributeConfig attributeConfig) {
-        if (isRayTracingShaderPackPathAttribute(module, attributeConfig)) {
+        return isShaderPackAttribute(module, attributeConfig);
+    }
+
+    public static boolean isShaderPackAttribute(Module module, AttributeConfig attributeConfig) {
+        if (isShaderPackPathAttribute(module, attributeConfig)) {
             return true;
         }
-        return isRayTracingShaderPackDynamicAttribute(module, attributeConfig);
+        return isShaderPackDynamicAttribute(module, attributeConfig);
     }
 
     public static boolean isRayTracingShaderPackDynamicAttribute(Module module, AttributeConfig attributeConfig) {
+        return isShaderPackDynamicAttribute(module, attributeConfig);
+    }
+
+    public static boolean isShaderPackDynamicAttribute(Module module, AttributeConfig attributeConfig) {
         if (module == null
                 || attributeConfig == null
                 || attributeConfig.name == null
-                || !Objects.equals(module.name, RAY_TRACING_MODULE_NAME)) {
+                || !isShaderPackModule(module)) {
             return false;
         }
         return !collectStaticAttributeNames(module).contains(attributeConfig.name);
     }
 
     public static List<AttributeConfig> getRayTracingShaderPackAttributes() {
-        Module module = getRayTracingModule();
+        return getShaderPackAttributes();
+    }
+
+    public static List<AttributeConfig> getShaderPackAttributes() {
+        Module module = getShaderPackModule();
         if (module == null) {
             return List.of();
         }
@@ -367,7 +424,7 @@ public class Pipeline {
             return attributes;
         }
         for (AttributeConfig attributeConfig : module.attributeConfigs) {
-            if (isRayTracingShaderPackDynamicAttribute(module, attributeConfig)) {
+            if (isShaderPackDynamicAttribute(module, attributeConfig)) {
                 attributes.add(attributeConfig);
             }
         }
@@ -375,14 +432,22 @@ public class Pipeline {
     }
 
     private static Path resolveShaderPackPath(String configuredPath) {
+        return resolveShaderPackPath(configuredPath, VANILLA_RAY_TRACING_SHADER_PACK_PATH);
+    }
+
+    private static Path resolveShaderPackPath(String configuredPath, String fallbackPath) {
         String value = configuredPath == null ? "" : configuredPath.trim();
         Path shaderPackPath = value.isEmpty()
-                ? Path.of(VANILLA_RAY_TRACING_SHADER_PACK_PATH)
+                ? Path.of(fallbackPath == null || fallbackPath.isBlank() ? "." : fallbackPath)
                 : Path.of(value);
         if (!shaderPackPath.isAbsolute() && RadianceRuntimePaths.radianceDir != null) {
             shaderPackPath = RadianceRuntimePaths.radianceDir.resolve(shaderPackPath);
         }
         return shaderPackPath.toAbsolutePath().normalize();
+    }
+
+    private static Path resolveShaderPackPath(Module module, String configuredPath) {
+        return resolveShaderPackPath(configuredPath, defaultShaderPackPath(module));
     }
 
     private static Path getInternalShaderPackDirectory() {
@@ -639,6 +704,14 @@ public class Pipeline {
         return readRequiresEmissionFromConfig(resolveShaderPackPath(configuredPath));
     }
 
+    private static boolean shaderPackRequiresEmission(Module module, String configuredPath) {
+        String value = configuredPath == null ? "" : configuredPath.trim();
+        if (value.isEmpty() && module != null && !hasDefaultShaderPack(module)) {
+            return false;
+        }
+        return readRequiresEmissionFromConfig(resolveShaderPackPath(module, configuredPath));
+    }
+
     public static boolean isShaderPackSelectable(ShaderPackChoice choice) {
         return choice != null && (!shaderPackRequiresEmission(choice.relativePath()) || Options.collectChunkEmission);
     }
@@ -653,23 +726,23 @@ public class Pipeline {
         return null;
     }
 
-    private static boolean isShaderPackValueSelectable(String configuredPath) {
-        return !shaderPackRequiresEmission(configuredPath) || Options.collectChunkEmission;
+    private static boolean isShaderPackValueSelectable(Module module, String configuredPath) {
+        return !shaderPackRequiresEmission(module, configuredPath) || Options.collectChunkEmission;
     }
 
     private static boolean fallbackUnavailableShaderPacks() {
         boolean changed = false;
         for (Module module : INSTANCE.modules) {
-            if (module == null || !Objects.equals(module.name, RAY_TRACING_MODULE_NAME)) {
+            if (!isShaderPackModule(module)) {
                 continue;
             }
-            AttributeConfig shaderPackPath = findAttribute(module, RAY_TRACING_SHADER_PACK_PATH_ATTRIBUTE);
-            if (shaderPackPath == null || isShaderPackValueSelectable(shaderPackPath.value)) {
+            AttributeConfig shaderPackPath = findAttribute(module, shaderPackPathAttributeName(module));
+            if (shaderPackPath == null || isShaderPackValueSelectable(module, shaderPackPath.value)) {
                 continue;
             }
-            shaderPackPath.value = VANILLA_RAY_TRACING_SHADER_PACK_PATH;
+            shaderPackPath.value = defaultShaderPackPath(module);
             changed = true;
-            LOGGER.warn("Selected shader pack requires chunk emission collection. Falling back to vanilla PT.");
+            LOGGER.warn("Selected shader pack requires chunk emission collection. Falling back to the module default.");
         }
         return changed;
     }
@@ -693,10 +766,10 @@ public class Pipeline {
 
         boolean changed = false;
         for (Module module : INSTANCE.modules) {
-            if (module == null || !Objects.equals(module.name, RAY_TRACING_MODULE_NAME)) {
+            if (!isShaderPackModule(module)) {
                 continue;
             }
-            AttributeConfig shaderPackPath = findAttribute(module, RAY_TRACING_SHADER_PACK_PATH_ATTRIBUTE);
+            AttributeConfig shaderPackPath = findAttribute(module, shaderPackPathAttributeName(module));
             if (shaderPackPath == null || Objects.equals(shaderPackPath.value, choice.relativePath())) {
                 continue;
             }
@@ -717,15 +790,19 @@ public class Pipeline {
             return false;
         }
         for (Module module : INSTANCE.modules) {
-            if (module == null || !Objects.equals(module.name, RAY_TRACING_MODULE_NAME)) {
+            if (!isShaderPackModule(module)) {
                 continue;
             }
-            AttributeConfig shaderPackPath = findAttribute(module, RAY_TRACING_SHADER_PACK_PATH_ATTRIBUTE);
+            AttributeConfig shaderPackPath = findAttribute(module, shaderPackPathAttributeName(module));
             String value = shaderPackPath == null || shaderPackPath.value == null ? "" : shaderPackPath.value.trim();
-            if (value.isEmpty() && Objects.equals(choice.relativePath(), VANILLA_RAY_TRACING_SHADER_PACK_PATH)) {
+            String defaultPath = defaultShaderPackPath(module);
+            if (value.isEmpty() && !defaultPath.isBlank() && Objects.equals(choice.relativePath(), defaultPath)) {
                 return true;
             }
-            Path current = resolveShaderPackPath(value);
+            if (value.isEmpty()) {
+                return false;
+            }
+            Path current = resolveShaderPackPath(module, value);
             Path candidate = resolveShaderPackPath(choice.relativePath());
             return Objects.equals(current, candidate);
         }
@@ -1943,13 +2020,14 @@ public class Pipeline {
         Path shaderPackAttributeStoragePath = null;
         boolean preserveCurrentDynamicValues = true;
 
-        if (Objects.equals(module.name, RAY_TRACING_MODULE_NAME)) {
+        if (isShaderPackModule(module)) {
             List<AttributeConfig> sourceAttributes =
                     module.attributeConfigs != null ? module.attributeConfigs : module.staticAttributeConfigs;
             String configuredPath = "";
+            String pathAttributeName = shaderPackPathAttributeName(module);
             if (sourceAttributes != null) {
                 for (AttributeConfig attributeConfig : sourceAttributes) {
-                    if (attributeConfig == null || !Objects.equals(attributeConfig.name, RAY_TRACING_SHADER_PACK_PATH_ATTRIBUTE)) {
+                    if (attributeConfig == null || !Objects.equals(attributeConfig.name, pathAttributeName)) {
                         continue;
                     }
                     configuredPath = attributeConfig.value == null ? "" : attributeConfig.value.trim();
@@ -1960,9 +2038,10 @@ public class Pipeline {
             try {
                 Path shaderPackPath = null;
                 if (configuredPath.isEmpty()) {
-                    if (RadianceRuntimePaths.radianceDir != null) {
+                    String defaultPath = defaultShaderPackPath(module);
+                    if (!defaultPath.isBlank() && RadianceRuntimePaths.radianceDir != null) {
                         shaderPackPath = RadianceRuntimePaths.radianceDir
-                                .resolve(INTERNAL_RAY_TRACING_SHADER_PACK_PATH)
+                                .resolve(defaultPath)
                                 .toAbsolutePath()
                                 .normalize();
                     }
@@ -2002,10 +2081,12 @@ public class Pipeline {
 
             String language = getCurrentLanguageCode();
 
-            String metadata = getAttributes(
+            String metadata = hasDefaultShaderPack(module) || !configuredPath.isBlank()
+                    ? getAttributes(
                     module.name,
                     attributeList.toArray(String[]::new),
-                    language);
+                    language)
+                    : "";
             if (metadata != null && !metadata.isBlank()) {
                 Object loaded = new Yaml().load(metadata);
                 if (loaded instanceof Map<?, ?> root) {
@@ -2247,7 +2328,7 @@ public class Pipeline {
         if (attributeConfigs == null || storedAttributes == null) {
             return;
         }
-        Set<String> staticAttributeNames = Objects.equals(module.name, RAY_TRACING_MODULE_NAME)
+        Set<String> staticAttributeNames = isShaderPackModule(module)
                 ? collectStaticAttributeNames(module)
                 : null;
 
@@ -2291,13 +2372,14 @@ public class Pipeline {
         }
 
         for (Module module : INSTANCE.modules) {
-            if (module == null || !Objects.equals(module.name, RAY_TRACING_MODULE_NAME) || module.attributeConfigs == null) {
+            if (!isShaderPackModule(module) || module.attributeConfigs == null) {
                 continue;
             }
 
             String configuredPath = "";
+            String pathAttributeName = shaderPackPathAttributeName(module);
             for (AttributeConfig attributeConfig : module.attributeConfigs) {
-                if (attributeConfig == null || !Objects.equals(attributeConfig.name, RAY_TRACING_SHADER_PACK_PATH_ATTRIBUTE)) {
+                if (attributeConfig == null || !Objects.equals(attributeConfig.name, pathAttributeName)) {
                     continue;
                 }
                 configuredPath = attributeConfig.value == null ? "" : attributeConfig.value.trim();
@@ -2308,9 +2390,10 @@ public class Pipeline {
             try {
                 Path shaderPackPath = null;
                 if (configuredPath.isEmpty()) {
-                    if (RadianceRuntimePaths.radianceDir != null) {
+                    String defaultPath = defaultShaderPackPath(module);
+                    if (!defaultPath.isBlank() && RadianceRuntimePaths.radianceDir != null) {
                         shaderPackPath = RadianceRuntimePaths.radianceDir
-                                .resolve(INTERNAL_RAY_TRACING_SHADER_PACK_PATH)
+                                .resolve(defaultPath)
                                 .toAbsolutePath()
                                 .normalize();
                     }
@@ -2467,7 +2550,7 @@ public class Pipeline {
         if (module == null || module.attributeConfigs == null) {
             return out;
         }
-        Set<String> staticAttributeNames = Objects.equals(module.name, RAY_TRACING_MODULE_NAME)
+        Set<String> staticAttributeNames = isShaderPackModule(module)
                 ? collectStaticAttributeNames(module)
                 : null;
 
