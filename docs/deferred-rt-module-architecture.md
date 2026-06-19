@@ -98,6 +98,14 @@ The module is independent from the existing `RayTracingModule`, but it should re
 - post-render integration,
 - NRD/upscaler/temporal-compatible output buffers where possible.
 
+Current implementation note as of Step 29:
+
+- `ShaderPackLoader` has a third metadata stage, `stage: deferred`.
+- The loader accepts both `execution_deferred` and nested `execution.deferred`.
+- Deferred-stage passes can be represented in the shared pass list, but `DeferredRtModule` does not yet record them.
+- A lightweight stage-contract helper rejects PT/SBT declarations for Deferred-stage passes before runtime setup.
+- Existing PT and PostRender shaderpacks continue to use the same loader and execution model.
+
 ---
 
 ## 4. Module Contract
@@ -3003,13 +3011,20 @@ Goal: make the fixed pipeline user-customizable without exposing PT concepts or 
 
 #### 6.1 Extend shaderpack metadata
 
+Implementation status as of Step 29: partially complete. The shared loader now understands `stage: deferred`,
+`execution_deferred` and nested `execution.deferred`, and rejects Deferred-stage passes that try to use PT/SBT
+fields such as `rgen`, `hit_groups`, `rchit`, `rahit` or `query_sharc`. This is a metadata/parser foundation only:
+Deferred RT still needs a runtime that consumes Deferred-stage passes and binds scene draw streams, G-buffer images
+and ray-query resources.
+
 Implementation steps:
 
-- Add `stage: deferred`.
-- Add `execution_deferred`.
+- Add `stage: deferred`. Completed in Step 29.
+- Add `execution_deferred`. Completed in Step 29.
 - Add pass kinds:
-  - `render`,
-  - `compute`,
+  - `render`, metadata accepted in Step 29,
+  - `compute`, metadata accepted in Step 29,
+  - `full_screen`, metadata accepted in Step 29 for graphics and `compute_3d` backends,
   - `ray_query`,
   - optional `copy/resolve`.
 - Add resource kinds:
@@ -3019,17 +3034,26 @@ Implementation steps:
   - storage buffer,
   - scene draw stream.
 - Add validation that Deferred RT packs cannot declare:
-  - `rgen`,
-  - `rmiss`,
-  - `rchit`,
-  - `rahit`,
-  - SBT,
-  - PT hit groups.
+  - `rgen`, completed in Step 29,
+  - `rmiss` / `miss`, completed in Step 29,
+  - `rchit`, completed in Step 29,
+  - `rahit`, completed in Step 29,
+  - SBT-style shader/hit fields, completed in Step 29,
+  - PT hit groups, completed in Step 29.
+
+Remaining implementation steps after Step 29:
+
+- Add `ray_query` as a distinct pass kind instead of overloading generic compute metadata.
+- Add Deferred-stage runtime command recording in `DeferredRtModule`.
+- Add resource validation for Deferred-stage internal images, public exports and scene draw streams.
+- Add a shaderpack lint/offline parser tool that can validate a Deferred pack without launching Minecraft.
+- Add a minimal built-in `vanilla-deferred-rt` pack after the fixed G-buffer path has real runtime passes to move.
 
 Completion standard:
 
 - A deferred pack can declare G-buffer, lighting and compose passes.
-- A pack using PT-only declarations fails before rendering with a clear error.
+- A pack using PT-only declarations fails before rendering with a clear error. The PT-only part is covered by Step 29;
+  full resource/pass validation remains future work.
 
 #### 6.2 Add view/layer execution declarations
 

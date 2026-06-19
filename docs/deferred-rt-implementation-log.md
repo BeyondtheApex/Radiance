@@ -1133,3 +1133,49 @@ Status: in progress
   - Run an in-game smoke test after selecting the simplest Deferred RT preset once the user is ready to launch Minecraft.
   - Deferred shaderpack runtime is still not implemented. This step only makes Deferred RT selectable through the same Java preset structure as PT.
   - The PT and Deferred RT preset families now coexist, but shared shaderpack discovery still targets PT packs only. Deferred shaderpack metadata/runtime remains a later planned step.
+
+### Step 29: Deferred Shaderpack Stage Metadata Foundation
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.cpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack_stage_contract.hpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack_stage_contract.cpp`
+  - `MCVR-custom/tests/shader_pack_stage_contract_test.cpp`
+  - `MCVR-custom/tests/CMakeLists.txt`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Step 28 made Deferred RT selectable through the same Java preset family as PT, but shaderpack metadata still only modeled PT and PostRender stages.
+  - The project should keep one shaderpack structure instead of adding a separate Deferred-only configuration language.
+  - Deferred RT must not inherit PT/SBT concepts such as `rgen`, hit groups, miss shaders or SHARC update-pass metadata.
+- Implemented:
+  - Added `ShaderPackLoader::Stage::Deferred`.
+  - Added `ShaderPackLoader::KEY_DEFERRED = "deferred"` and `KEY_EXECUTION_DEFERRED = "execution_deferred"`.
+  - Added `ShaderPackLoader::ShaderPack::deferredExecution` and `ShaderPack::deferredStageRuntime_`.
+  - Extended stage parsing so shaderpack JSON can use `stage: deferred`.
+  - Extended execution parsing so Deferred-stage execution can be declared as either:
+    - top-level `execution_deferred`, or
+    - nested `execution.deferred`.
+  - Added duplicate guards so `execution_deferred` cannot silently override `execution.deferred`, and `execution_post` cannot silently override `execution.post_render`.
+  - Added default execution-command generation for Deferred-stage passes, matching the existing PT/PostRender behavior.
+  - Changed `ShaderPack::stageRuntime(...)` and `ShaderPack::execution(...)` from two-way fallback logic to explicit three-way switches so Deferred never accidentally aliases RayTracing state.
+  - Added `shader_pack_stage_contract` as a lightweight, reusable contract helper for:
+    - stage-name parsing,
+    - pass-kind allow/deny matrix,
+    - Deferred-stage PT/SBT field rejection.
+  - Allowed Deferred-stage metadata for `render`, `compute` and `full_screen` passes. `full_screen` `compute_3d` now accepts PostRender or Deferred stages.
+  - Rejected Deferred-stage use of PT/SBT-only fields including `rgen`, `default_hit_group`, `hit_groups`, `query_sharc`, `miss`, `rmiss`, `sbt`, `shaders`, `rchit`, `rahit` and `rint`.
+  - Added `shader_pack_stage_contract_test` and included it in the `mcvr_tests` custom target.
+  - Updated the architecture document's Phase 6.1 status to mark the metadata/parser foundation complete while keeping runtime migration as future work.
+- Verification:
+  - `shader_pack_stage_contract_test.exe` completed successfully.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 7/7 tests passed.
+- Remaining work:
+  - Add a real Deferred shaderpack runtime inside `DeferredRtModule` that consumes `stage: deferred` passes.
+  - Add a distinct `ray_query` pass kind instead of treating first Deferred lighting metadata as generic compute.
+  - Add Deferred resource validation for internal G-buffer images, public exports, scene draw streams and ray-query resources.
+  - Add a shaderpack lint/offline parser tool so Deferred packs can be validated without launching Minecraft.
+  - Add a minimal built-in `vanilla-deferred-rt` pack once fixed G-buffer and lighting runtime passes are ready to move into shaderpack metadata.
