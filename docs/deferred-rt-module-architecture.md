@@ -775,7 +775,7 @@ Remaining adapter work:
 
 - Add a more exact Java-side adapter or mixin surface for depth test, depth write, write masks, output target, overlay/lightmap, outline/crumbling, layering and `sortOnUpload` instead of relying on layer-name inference.
 - Extend replay capture if offline replay needs to test metadata-sensitive transparency behavior. Current replay stays on the old payload path and intentionally exercises fallback classification.
-- Surface provider statistics in a debug overlay, log or offline runner so fallback classification is visible in real frames.
+- `DeferredRtModule::latestDiagnosticsSnapshot()` now provides a native, frame-latency-aware snapshot combining provider metadata/fallback stats, classification stats and lighting pass stats. Remaining work is to surface that snapshot in a debug overlay, log or offline runner so fallback classification is visible in real frames.
 
 Rules:
 

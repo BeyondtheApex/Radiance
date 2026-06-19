@@ -953,3 +953,52 @@ Status: in progress
   - Extend replay capture if metadata-sensitive transparency behavior must be tested offline. Current replay intentionally remains on the old payload path and therefore exercises fallback classification.
   - Surface provider stats in a debug overlay, log export or offline runner so real-frame fallback classification is visible.
   - Implement the actual `transparent_forward` / refraction path. Step 24 only makes classification accurate enough to route true translucent content out of the opaque/cutout G-buffer.
+
+### Step 25: Deferred RT Native Diagnostics Snapshot
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_diagnostics.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_diagnostics.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/tests/deferred_rt_diagnostics_test.cpp`
+  - `MCVR-custom/tests/CMakeLists.txt`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+- Reason for this step:
+  - Step 20 exposed classification GPU stats, Step 23 exposed lighting pass GPU stats, and Step 24 exposed provider metadata/fallback stats.
+  - Those counters need a single native snapshot before any debug overlay, log export or offline runner consumes them.
+  - The snapshot must respect frame-slot latency: provider stats are collected during the current frame, while GPU stats become valid when the same swapchain frame slot is reused after its fence completes.
+- Implemented:
+  - Added `DeferredRtDiagnosticsSnapshot` with:
+    - frame index,
+    - requested view count,
+    - uploaded G-buffer view count,
+    - uploaded G-buffer draw count,
+    - `SceneProviderStats`,
+    - `DeferredRtClassificationStats`,
+    - `DeferredRtPassStats`.
+  - Added CPU helpers to:
+    - build a snapshot,
+    - compute total provider packets,
+    - compute total provider indices,
+    - compute fallback packet count without double-counting `legacyTransparentCutoutFallbackPackets`,
+    - detect whether a snapshot contains provider fallback,
+    - format one compact native diagnostics line.
+  - Added `DeferredRtModule::latestDiagnosticsSnapshot()` as the native module accessor for future overlay/log/offline-runner use.
+  - Added per-frame pending diagnostics snapshots in `DeferredRtModule`.
+  - `render3D()` now:
+    - reads completed classification/pass stats for the current frame slot,
+    - publishes the completed diagnostics snapshot for that same frame slot,
+    - begins the new provider frame,
+    - stores a new pending snapshot after G-buffer upload has determined view/draw counts.
+  - Added `deferred_rt_diagnostics_test` covering provider totals, fallback count semantics, snapshot construction and formatted output.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 6/6 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed `core.dll` plus current shader resources.
+- Remaining work:
+  - Wire `latestDiagnosticsSnapshot()` to a native log path, an in-game debug overlay or the future offline runner. Step 25 deliberately only adds the shared native data surface.
+  - Add a runtime policy for when diagnostics formatting is emitted so normal gameplay does not log every frame by default.
+  - Extend diagnostics after `transparent_forward` exists so translucent/refraction work has pass-specific counters instead of only provider routing counts.
