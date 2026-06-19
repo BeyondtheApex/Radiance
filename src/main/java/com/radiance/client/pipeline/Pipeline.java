@@ -1,11 +1,13 @@
 package com.radiance.client.pipeline;
 
-import com.radiance.client.RadianceClient;
+import com.mojang.logging.LogUtils;
+import com.radiance.client.RadianceRuntimePaths;
 import com.radiance.client.constant.VulkanConstants;
 import com.radiance.client.option.Options;
 import com.radiance.client.pipeline.config.AttributeConfig;
 import com.radiance.client.pipeline.config.ImageConfig;
 import com.radiance.client.proxy.vulkan.VRProxy;
+import com.radiance.client.replay.hook.ReplayCaptureHooks;
 import net.minecraft.client.MinecraftClient;
 
 import java.io.IOException;
@@ -28,6 +30,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 import org.lwjgl.system.MemoryUtil;
+import org.slf4j.Logger;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
@@ -36,6 +39,7 @@ import org.yaml.snakeyaml.inspector.TagInspector;
 
 public class Pipeline {
 
+    private static final Logger LOGGER = LogUtils.getLogger();
     public static Pipeline INSTANCE = new Pipeline();
     public static int eyeCount = 1; // Updated from VRProxy at runtime
     private static final String RAY_TRACING_MODULE_NAME = "render_pipeline.module.ray_tracing.name";
@@ -196,7 +200,7 @@ public class Pipeline {
         }
 
         if (reason != null && !reason.isEmpty()) {
-            RadianceClient.LOGGER.warn(reason + " Fallback preset: " + fallbackPresetName);
+            LOGGER.warn(reason + " Fallback preset: " + fallbackPresetName);
         }
         assemblePresetByKeyInternal(fallbackPresetName);
     }
@@ -308,17 +312,17 @@ public class Pipeline {
         Path shaderPackPath = value.isEmpty()
                 ? Path.of(VANILLA_RAY_TRACING_SHADER_PACK_PATH)
                 : Path.of(value);
-        if (!shaderPackPath.isAbsolute() && RadianceClient.radianceDir != null) {
-            shaderPackPath = RadianceClient.radianceDir.resolve(shaderPackPath);
+        if (!shaderPackPath.isAbsolute() && RadianceRuntimePaths.radianceDir != null) {
+            shaderPackPath = RadianceRuntimePaths.radianceDir.resolve(shaderPackPath);
         }
         return shaderPackPath.toAbsolutePath().normalize();
     }
 
     private static Path getInternalShaderPackDirectory() {
-        if (RadianceClient.radianceDir == null) {
+        if (RadianceRuntimePaths.radianceDir == null) {
             return null;
         }
-        return RadianceClient.radianceDir.resolve(INTERNAL_SHADER_PACK_DIRECTORY).toAbsolutePath().normalize();
+        return RadianceRuntimePaths.radianceDir.resolve(INTERNAL_SHADER_PACK_DIRECTORY).toAbsolutePath().normalize();
     }
 
     private static Path getMinecraftShaderPackDirectory() {
@@ -331,7 +335,7 @@ public class Pipeline {
         try {
             Files.createDirectories(shaderPackDirectory);
         } catch (IOException e) {
-            RadianceClient.LOGGER.warn("Failed to create shader pack directory: {}", shaderPackDirectory, e);
+            LOGGER.warn("Failed to create shader pack directory: {}", shaderPackDirectory, e);
             return null;
         }
         return shaderPackDirectory.toAbsolutePath().normalize();
@@ -357,7 +361,7 @@ public class Pipeline {
                         }
                     });
         } catch (IOException e) {
-            RadianceClient.LOGGER.warn("Failed to scan shader pack directory: {}", directory, e);
+            LOGGER.warn("Failed to scan shader pack directory: {}", directory, e);
         }
     }
 
@@ -431,8 +435,8 @@ public class Pipeline {
         }
 
         Path normalizedPath = shaderPackPath.toAbsolutePath().normalize();
-        if (RadianceClient.radianceDir != null) {
-            Path radianceRoot = RadianceClient.radianceDir.toAbsolutePath().normalize();
+        if (RadianceRuntimePaths.radianceDir != null) {
+            Path radianceRoot = RadianceRuntimePaths.radianceDir.toAbsolutePath().normalize();
             if (normalizedPath.startsWith(radianceRoot)) {
                 return radianceRoot.relativize(normalizedPath).toString().replace('\\', '/');
             }
@@ -468,7 +472,7 @@ public class Pipeline {
                 }
             }
         } catch (Exception e) {
-            RadianceClient.LOGGER.warn("Failed to read shader pack document: {} from {}", fileName, shaderPackPath, e);
+            LOGGER.warn("Failed to read shader pack document: {} from {}", fileName, shaderPackPath, e);
             return null;
         }
     }
@@ -557,7 +561,7 @@ public class Pipeline {
                 }
             }
         } catch (Exception e) {
-            RadianceClient.LOGGER.warn("Failed to read shader pack config: {}", shaderPackPath, e);
+            LOGGER.warn("Failed to read shader pack config: {}", shaderPackPath, e);
         }
 
         String fileName = shaderPackPath.getFileName() == null ? "" : shaderPackPath.getFileName().toString();
@@ -598,7 +602,7 @@ public class Pipeline {
             }
             shaderPackPath.value = VANILLA_RAY_TRACING_SHADER_PACK_PATH;
             changed = true;
-            RadianceClient.LOGGER.warn("Selected shader pack requires chunk emission collection. Falling back to vanilla PT.");
+            LOGGER.warn("Selected shader pack requires chunk emission collection. Falling back to vanilla PT.");
         }
         return changed;
     }
@@ -671,7 +675,7 @@ public class Pipeline {
             buildInternal();
             built = true;
         } catch (Exception e) {
-            RadianceClient.LOGGER.error("Failed to build render pipeline.", e);
+            LOGGER.error("Failed to build render pipeline.", e);
             if (isPipelineCompatibilityFailure(e) && tryRebuildCompatiblePipeline(e)) {
                 built = true;
             }
@@ -771,7 +775,45 @@ public class Pipeline {
                     m.attributeConfigs != null ? m.attributeConfigs : new ArrayList<>());
         }
 
+        ReplayCaptureHooks.pipelineBuild(buildReplayPipelineSummary(sortedModules, imageFormatList));
         buildNative(sortedModules, imageFormatList, configToImageIdMap, moduleAttributes);
+    }
+
+    private static String buildReplayPipelineSummary(List<Module> sortedModules, List<Integer> imageFormatList) {
+        StringBuilder builder = new StringBuilder();
+        builder.append('{');
+        builder.append("\"eyeCount\":").append(eyeCount).append(',');
+        builder.append("\"imageFormats\":[");
+        for (int i = 0; i < imageFormatList.size(); i++) {
+            if (i > 0) {
+                builder.append(',');
+            }
+            builder.append(imageFormatList.get(i));
+        }
+        builder.append("],\"modules\":[");
+        for (int i = 0; i < sortedModules.size(); i++) {
+            if (i > 0) {
+                builder.append(',');
+            }
+            Module module = sortedModules.get(i);
+            builder.append('{');
+            builder.append("\"name\":\"").append(escapeReplayJson(module.name)).append("\",");
+            builder.append("\"inputCount\":").append(module.inputImageConfigs.size()).append(',');
+            builder.append("\"outputCount\":").append(module.outputImageConfigs.size()).append(',');
+            builder.append("\"attributeCount\":")
+                .append(module.attributeConfigs == null ? 0 : module.attributeConfigs.size());
+            builder.append('}');
+        }
+        builder.append("]}");
+        return builder.toString();
+    }
+
+    private static String escapeReplayJson(String value) {
+        return Objects.toString(value, "")
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\r", "\\r")
+            .replace("\n", "\\n");
     }
 
     private static boolean isPipelineCompatibilityFailure(Exception e) {
@@ -805,12 +847,12 @@ public class Pipeline {
             presetToBuild = getBestAvailablePresetName();
         }
         if (presetToBuild == null) {
-            RadianceClient.LOGGER.error("Failed to rebuild an incompatible pipeline: no preset is available.", cause);
+            LOGGER.error("Failed to rebuild an incompatible pipeline: no preset is available.", cause);
             return false;
         }
 
         try {
-            RadianceClient.LOGGER.warn(
+            LOGGER.warn(
                     "Stored pipeline is incompatible with current module definitions. Rebuilding preset: {}",
                     presetToBuild);
 
@@ -826,7 +868,7 @@ public class Pipeline {
             buildInternal();
             return true;
         } catch (Exception rebuildError) {
-            RadianceClient.LOGGER.error("Automatic pipeline rebuild failed.", rebuildError);
+            LOGGER.error("Automatic pipeline rebuild failed.", rebuildError);
             return false;
         }
     }
@@ -1463,16 +1505,16 @@ public class Pipeline {
             try {
                 Path shaderPackPath = null;
                 if (configuredPath.isEmpty()) {
-                    if (RadianceClient.radianceDir != null) {
-                        shaderPackPath = RadianceClient.radianceDir
+                    if (RadianceRuntimePaths.radianceDir != null) {
+                        shaderPackPath = RadianceRuntimePaths.radianceDir
                                 .resolve(INTERNAL_RAY_TRACING_SHADER_PACK_PATH)
                                 .toAbsolutePath()
                                 .normalize();
                     }
                 } else {
                     shaderPackPath = Path.of(configuredPath);
-                    if (!shaderPackPath.isAbsolute() && RadianceClient.radianceDir != null) {
-                        shaderPackPath = RadianceClient.radianceDir.resolve(shaderPackPath);
+                    if (!shaderPackPath.isAbsolute() && RadianceRuntimePaths.radianceDir != null) {
+                        shaderPackPath = RadianceRuntimePaths.radianceDir.resolve(shaderPackPath);
                     }
                     shaderPackPath = shaderPackPath.toAbsolutePath().normalize();
                 }
@@ -1482,7 +1524,7 @@ public class Pipeline {
                             shaderPackPath.resolveSibling(shaderPackPath.getFileName().toString() + ".txt");
                 }
             } catch (Exception e) {
-                RadianceClient.LOGGER.error("Error while resolving shader pack path: {}", configuredPath, e);
+                LOGGER.error("Error while resolving shader pack path: {}", configuredPath, e);
             }
 
             String normalizedStoragePath = shaderPackAttributeStoragePath == null
@@ -1568,7 +1610,7 @@ public class Pipeline {
                         storedValues.put(key, line.substring(separatorIndex + 1));
                     }
                 } catch (IOException e) {
-                    RadianceClient.LOGGER.error(
+                    LOGGER.error(
                             "Error while loading shader attribute storage: {}",
                             shaderPackAttributeStoragePath,
                             e);
@@ -1814,16 +1856,16 @@ public class Pipeline {
             try {
                 Path shaderPackPath = null;
                 if (configuredPath.isEmpty()) {
-                    if (RadianceClient.radianceDir != null) {
-                        shaderPackPath = RadianceClient.radianceDir
+                    if (RadianceRuntimePaths.radianceDir != null) {
+                        shaderPackPath = RadianceRuntimePaths.radianceDir
                                 .resolve(INTERNAL_RAY_TRACING_SHADER_PACK_PATH)
                                 .toAbsolutePath()
                                 .normalize();
                     }
                 } else {
                     shaderPackPath = Path.of(configuredPath);
-                    if (!shaderPackPath.isAbsolute() && RadianceClient.radianceDir != null) {
-                        shaderPackPath = RadianceClient.radianceDir.resolve(shaderPackPath);
+                    if (!shaderPackPath.isAbsolute() && RadianceRuntimePaths.radianceDir != null) {
+                        shaderPackPath = RadianceRuntimePaths.radianceDir.resolve(shaderPackPath);
                     }
                     shaderPackPath = shaderPackPath.toAbsolutePath().normalize();
                 }
@@ -1832,7 +1874,7 @@ public class Pipeline {
                     storagePath = shaderPackPath.resolveSibling(shaderPackPath.getFileName().toString() + ".txt");
                 }
             } catch (Exception e) {
-                RadianceClient.LOGGER.error("Error while resolving shader pack path: {}", configuredPath, e);
+                LOGGER.error("Error while resolving shader pack path: {}", configuredPath, e);
             }
 
             if (storagePath == null) {
@@ -2045,7 +2087,7 @@ public class Pipeline {
             }
             return storage;
         } catch (Exception e) {
-            RadianceClient.LOGGER.error("Error while loading pipeline config.", e);
+            LOGGER.error("Error while loading pipeline config.", e);
             return null;
         }
     }
@@ -2074,7 +2116,7 @@ public class Pipeline {
         }
 
         if (hasUnavailableStoredModules(pipelineStorage)) {
-            RadianceClient.LOGGER.warn("Stored pipeline contains unavailable modules. Falling back to NRD+FSR.");
+            LOGGER.warn("Stored pipeline contains unavailable modules. Falling back to NRD+FSR.");
             assembleNRDFSR();
             return;
         }

@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import com.radiance.client.option.Options;
 import com.radiance.client.pipeline.Pipeline;
 import com.radiance.client.proxy.vulkan.RendererProxy;
+import com.radiance.client.replay.hook.ReplayCaptureHooks;
 import com.radiance.client.config.VRPerformanceConfig;
 import com.radiance.client.gui.VRPerformanceManager;
 import com.radiance.client.keybindings.VRPerformanceKeys;
@@ -42,11 +43,13 @@ public class RadianceClient implements ClientModInitializer {
         MinecraftClient mc = MinecraftClient.getInstance();
         Path mcBaseDir = mc.runDirectory.toPath();
         radianceDir = mcBaseDir.resolve("radiance");
+        RadianceRuntimePaths.radianceDir = radianceDir;
         try {
             Files.createDirectories(radianceDir);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+        ReplayCaptureHooks.installDiscoveredSink();
 
         // core lib
         String osName = System.getProperty("os.name");

@@ -8,6 +8,7 @@ import static org.lwjgl.system.MemoryUtil.memSet;
 
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.radiance.client.constant.Constants;
+import com.radiance.client.replay.hook.ReplayCaptureHooks;
 import com.radiance.client.texture.TextureTracker;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
@@ -27,14 +28,33 @@ public class BufferProxy {
 
     private static final int WORLD_UBO_SIZE = 896;
 
-    public static native int allocateBuffer();
+    private static native int allocateBufferNative();
 
-    public static native void initializeBuffer(int id, int size, int usageFlags);
+    public static int allocateBuffer() {
+        return ReplayCaptureHooks.bufferAllocated(allocateBufferNative());
+    }
 
-    public static native void buildIndexBuffer(int id, int type, int drawMode, int vertexCount,
+    private static native void initializeBufferNative(int id, int size, int usageFlags);
+
+    public static void initializeBuffer(int id, int size, int usageFlags) {
+        ReplayCaptureHooks.bufferInitialize(id, size, usageFlags);
+        initializeBufferNative(id, size, usageFlags);
+    }
+
+    private static native void buildIndexBufferNative(int id, int type, int drawMode, int vertexCount,
         int expectedIndexCount);
 
-    public static native void queueUpload(long ptr, int dstId);
+    public static void buildIndexBuffer(int id, int type, int drawMode, int vertexCount,
+        int expectedIndexCount) {
+        ReplayCaptureHooks.bufferBuildIndex(id, type, drawMode, vertexCount, expectedIndexCount);
+        buildIndexBufferNative(id, type, drawMode, vertexCount, expectedIndexCount);
+    }
+
+    private static native void queueUploadNative(long ptr, int dstId);
+
+    public static void queueUpload(long ptr, int dstId) {
+        queueUploadNative(ptr, dstId);
+    }
 
     public static BufferInfo getBufferInfo(ByteBuffer buf) {
         ByteBuffer b = buf.slice();
@@ -46,13 +66,19 @@ public class BufferProxy {
         return new BufferInfo(buf, addr, size);
     }
 
-    private static void queueUpload(ByteBuffer buf, int expectedSize, int dstId) {
+    private static void queueUpload(ByteBuffer buf, int expectedSize, int dstId, int usageFlags) {
         BufferInfo bufferInfo = getBufferInfo(buf);
         assert bufferInfo.size == expectedSize;
+        ReplayCaptureHooks.bufferQueueUpload(buf.slice(), dstId, usageFlags);
         queueUpload(bufferInfo.addr, dstId);
     }
 
-    public static native void performQueuedUpload();
+    private static native void performQueuedUploadNative();
+
+    public static void performQueuedUpload() {
+        ReplayCaptureHooks.bufferPerformQueuedUpload();
+        performQueuedUploadNative();
+    }
 
     public static VertexIndexBufferHandle createAndUploadVertexIndexBuffer(
         BuiltBuffer builtBuffer) {
@@ -62,13 +88,15 @@ public class BufferProxy {
         int vertexSize = drawParameters.vertexCount() * drawParameters.format().getVertexSizeByte();
         int vertexId = allocateBuffer();
         initializeBuffer(vertexId, vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT.getValue());
-        queueUpload(builtBuffer.getBuffer(), vertexSize, vertexId);
+        queueUpload(builtBuffer.getBuffer(), vertexSize, vertexId,
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT.getValue());
 
         int indexSize = drawParameters.indexCount() * drawParameters.indexType().size;
         int indexId = allocateBuffer();
         initializeBuffer(indexId, indexSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT.getValue());
         if (builtBuffer.getSortedBuffer() != null) {
-            queueUpload(builtBuffer.getSortedBuffer(), indexSize, indexId);
+            queueUpload(builtBuffer.getSortedBuffer(), indexSize, indexId,
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT.getValue());
         } else {
             int type = Constants.IndexTypes.getValue(drawParameters.indexType());
             int drawMode = Constants.DrawModes.getValue(drawParameters.mode());
@@ -116,7 +144,11 @@ public class BufferProxy {
         }
     }
 
-    public static native void updateWorldUniform(long ptr);
+    private static native void updateWorldUniformNative(long ptr);
+
+    public static void updateWorldUniform(long ptr) {
+        updateWorldUniformNative(ptr);
+    }
 
     public static void updateWorldUniform(Camera camera, Matrix4f viewMatrix,
         Matrix4f effectedViewMatrix, Matrix4f projectionMatrix, int overlayTextureID, Fog fog,
@@ -199,11 +231,16 @@ public class BufferProxy {
             baseAddr += Integer.BYTES; // pad4
             baseAddr += Integer.BYTES; // pad5
 
+            ReplayCaptureHooks.worldUniform(bb.slice());
             updateWorldUniform(addr);
         }
     }
 
-    public static native void updateSkyUniform(long ptr);
+    private static native void updateSkyUniformNative(long ptr);
+
+    public static void updateSkyUniform(long ptr) {
+        updateSkyUniformNative(ptr);
+    }
 
     public static void updateSkyUniform(float baseColorR, float baseColorG, float baseColorB,
         float horizonColorR, float horizonColorG, float horizonColorB, float horizonColorA,
@@ -259,11 +296,16 @@ public class BufferProxy {
             baseAddr += Integer.BYTES;
             bb.putInt(baseAddr, 0);
 
+            ReplayCaptureHooks.skyUniform(bb.slice());
             updateSkyUniform(addr);
         }
     }
 
-    public static native void updateMapping(long ptr);
+    private static native void updateMappingNative(long ptr);
+
+    public static void updateMapping(long ptr) {
+        updateMappingNative(ptr);
+    }
 
     public static void updateMapping() {
         try (MemoryStack stack = stackPush()) {
@@ -310,6 +352,7 @@ public class BufferProxy {
                 }
             }
 
+            ReplayCaptureHooks.textureMapping(bb.slice());
             updateMapping(addr);
         }
     }

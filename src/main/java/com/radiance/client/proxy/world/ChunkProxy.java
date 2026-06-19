@@ -7,6 +7,8 @@ import com.mojang.blaze3d.systems.VertexSorter;
 import com.radiance.client.constant.Constants;
 import com.radiance.client.option.Options;
 import com.radiance.client.proxy.vulkan.BufferProxy;
+import com.radiance.client.replay.hook.ChunkRebuildCapture;
+import com.radiance.client.replay.hook.ReplayCaptureHooks;
 import com.radiance.mixin_related.extensions.vulkan_render_integration.IChunkBuilderBuiltChunkExt;
 import com.radiance.mixin_related.extensions.vulkan_render_integration.IChunkBuilderExt;
 import java.nio.ByteBuffer;
@@ -87,10 +89,13 @@ public class ChunkProxy {
     public static void init(int numChunks, int sizeX, int sizeY, int sizeZ,
         int bottomSectionCoord) {
         clear();
+        ReplayCaptureHooks.chunkInit(numChunks, sizeX, sizeY, sizeZ, bottomSectionCoord);
         initNative(numChunks, sizeX, sizeY, sizeZ, bottomSectionCoord);
     }
 
     public static void updateSectionPos(ChunkSectionPos sectionPos) {
+        ReplayCaptureHooks.chunkUpdateSectionPos(sectionPos.getSectionX(), sectionPos.getSectionY(),
+            sectionPos.getSectionZ());
         updateSectionPosNative(sectionPos.getSectionX(), sectionPos.getSectionY(),
             sectionPos.getSectionZ());
     }
@@ -323,6 +328,9 @@ public class ChunkProxy {
             ByteBuffer vertexCountBB = null;
             ByteBuffer verticesBB = null;
             List<ByteBuffer> geometryGroupNameBuffers = new ArrayList<>(buffers.size());
+            boolean replayCaptureActive = ReplayCaptureHooks.isActive();
+            List<ChunkRebuildCapture.Geometry> replayGeometries =
+                replayCaptureActive ? new ArrayList<>(buffers.size()) : List.of();
 
             try {
                 int geometryTypeSize = buffers.size() * Integer.BYTES;
@@ -384,6 +392,12 @@ public class ChunkProxy {
                     int vertexFormatID = Constants.VertexFormats.getValue(
                         vertexBuffer.getDrawParameters()
                             .format());
+                    byte[] replayVertexBytes = null;
+                    if (replayCaptureActive) {
+                        replayVertexBytes = new byte[vertexBufferInfo.size()];
+                        ByteBuffer replayVertexView = vertexBuffer.getBuffer().slice();
+                        replayVertexView.get(replayVertexBytes);
+                    }
 
                     geometryTypeBB.putInt(geometryTypeBaseAddr, geometryTypeID);
                     geometryTypeBaseAddr += Integer.BYTES;
@@ -407,8 +421,27 @@ public class ChunkProxy {
 
                     verticesBB.putLong(verticesBaseAddr, vertexBufferInfo.addr());
                     verticesBaseAddr += Long.BYTES;
+
+                    if (replayCaptureActive) {
+                        replayGeometries.add(new ChunkRebuildCapture.Geometry(
+                            geometryTypeID,
+                            renderLayer.name,
+                            geometryTextureID,
+                            vertexFormatID,
+                            vertexBuffer.getDrawParameters().vertexCount(),
+                            replayVertexBytes));
+                    }
                 }
 
+                if (replayCaptureActive) {
+                    ReplayCaptureHooks.chunkRebuild(new ChunkRebuildCapture(
+                        builtChunk.getOrigin().getX(),
+                        builtChunk.getOrigin().getY(),
+                        builtChunk.getOrigin().getZ(),
+                        builtChunk.index,
+                        important,
+                        replayGeometries));
+                }
                 rebuildSingle(builtChunk.getOrigin()
                         .getX(),
                     builtChunk.getOrigin()
@@ -468,13 +501,40 @@ public class ChunkProxy {
         long vertices,
         boolean important);
 
+    public static void rebuildSingleForReplay(int originX,
+        int originY,
+        int originZ,
+        long index,
+        int size,
+        long geometryTypes,
+        long geometryGroupNames,
+        long geometryTextures,
+        long vertexFormats,
+        long vertexCounts,
+        long vertices,
+        boolean important) {
+        rebuildSingle(originX, originY, originZ, index, size, geometryTypes, geometryGroupNames,
+            geometryTextures, vertexFormats, vertexCounts, vertices, important);
+    }
+
     public static native boolean isChunkReady(long index);
 
     public static boolean isChunkReady(ChunkBuilder.BuiltChunk builtChunk) {
         return isChunkReady(builtChunk.index);
     }
 
-    public static native void relocateSingle(long index, int originX, int originY, int originZ);
+    private static native void relocateSingleNative(long index, int originX, int originY,
+        int originZ);
 
-    public static native void invalidateSingle(long index);
+    public static void relocateSingle(long index, int originX, int originY, int originZ) {
+        ReplayCaptureHooks.chunkRelocate(index, originX, originY, originZ);
+        relocateSingleNative(index, originX, originY, originZ);
+    }
+
+    private static native void invalidateSingleNative(long index);
+
+    public static void invalidateSingle(long index) {
+        ReplayCaptureHooks.chunkInvalidate(index);
+        invalidateSingleNative(index);
+    }
 }

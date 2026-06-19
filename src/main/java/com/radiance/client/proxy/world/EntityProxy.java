@@ -11,6 +11,8 @@ import com.radiance.client.constant.Constants;
 import com.radiance.client.constant.Constants.PostRenderFlags;
 import com.radiance.client.constant.Constants.RayTracingFlags;
 import com.radiance.client.proxy.vulkan.BufferProxy;
+import com.radiance.client.replay.hook.EntityBuildCapture;
+import com.radiance.client.replay.hook.ReplayCaptureHooks;
 import com.radiance.client.vertex.PBRVertexConsumer;
 import com.radiance.client.vertex.StorageVertexConsumerProvider;
 import com.radiance.mixin_related.extensions.vulkan_render_integration.IHeldItemRendererExt;
@@ -867,6 +869,9 @@ public class EntityProxy {
         ByteBuffer indexFormatBB = null;
         ByteBuffer vertexCountBB = null;
         ByteBuffer verticesBB = null;
+        List<EntityBuildCapture.EntityData> captureEntities = ReplayCaptureHooks.isActive()
+            ? new ArrayList<>(entityRenderDataList.getTotalEntityCount())
+            : null;
 
         try {
             int entityHashCodeSize = entityRenderDataList.getTotalEntityCount() * Integer.BYTES;
@@ -955,6 +960,10 @@ public class EntityProxy {
             int verticesBaseAddr = 0;
 
             for (EntityRenderData entityRenderData : entityRenderDataList) {
+                List<EntityBuildCapture.LayerData> captureLayers = captureEntities == null
+                    ? null
+                    : new ArrayList<>(entityRenderData.size());
+
                 entityHashCodeBB.putInt(entityHashCodeBaseAddr, entityRenderData.hashCode);
                 entityHashCodeBaseAddr += Integer.BYTES;
 
@@ -1051,7 +1060,40 @@ public class EntityProxy {
 
                     verticesBB.putLong(verticesBaseAddr, vertexBufferInfo.addr());
                     verticesBaseAddr += Long.BYTES;
+
+                    if (captureLayers != null) {
+                        captureLayers.add(new EntityBuildCapture.LayerData(
+                            geometryTypeID,
+                            renderLayer.name,
+                            entityRenderLayer.contentName(),
+                            geometryTextureID,
+                            vertexFormatID,
+                            indexFormatID,
+                            vertexBuffer.getDrawParameters().vertexCount(),
+                            copyByteBuffer(vertexBufferInfo.buf())));
+                    }
                 }
+
+                if (captureEntities != null) {
+                    captureEntities.add(new EntityBuildCapture.EntityData(
+                        entityRenderData.hashCode,
+                        entityRenderData.x,
+                        entityRenderData.y,
+                        entityRenderData.z,
+                        entityRenderData.rayTracingFlag,
+                        entityRenderData.postRenderFlag,
+                        entityRenderData.prebuiltBLAS,
+                        entityRenderData.post,
+                        captureLayers));
+                }
+            }
+
+            if (captureEntities != null) {
+                ReplayCaptureHooks.entityQueueBuild(new EntityBuildCapture(
+                    lineWidth,
+                    coordinate.getValue(),
+                    normalOffset,
+                    captureEntities));
             }
 
             queueBuild(lineWidth,
@@ -1113,6 +1155,13 @@ public class EntityProxy {
         }
     }
 
+    private static byte[] copyByteBuffer(ByteBuffer input) {
+        ByteBuffer src = input.slice();
+        byte[] bytes = new byte[src.remaining()];
+        src.get(bytes);
+        return bytes;
+    }
+
     private static void closeBuiltBuffers(EntityRenderDataList entityRenderDataList) {
         for (EntityRenderData entityRenderData : entityRenderDataList) {
             for (EntityRenderLayer entityRenderLayer : entityRenderData) {
@@ -1155,7 +1204,40 @@ public class EntityProxy {
         long vertexCounts,
         long vertices);
 
-    public static native void build();
+    public static void queueBuildForReplay(float lineWidth,
+        int coordinate,
+        boolean normalOffset,
+        int size,
+        long entityHashCodes,
+        long entityPosXs,
+        long entityPosYs,
+        long entityPosZs,
+        long entityRayTracingFlags,
+        long entityPostRenderFlags,
+        long entityPrebuiltBLASs,
+        long entityPosts,
+        long entityLayerCounts,
+        long geometryTypes,
+        long geometryGroupNames,
+        long geometryContentNames,
+        long geometryTextures,
+        long vertexFormats,
+        long indexFormats,
+        long vertexCounts,
+        long vertices) {
+        queueBuild(lineWidth, coordinate, normalOffset, size, entityHashCodes, entityPosXs,
+            entityPosYs, entityPosZs, entityRayTracingFlags, entityPostRenderFlags,
+            entityPrebuiltBLASs, entityPosts, entityLayerCounts, geometryTypes, geometryGroupNames,
+            geometryContentNames, geometryTextures, vertexFormats, indexFormats, vertexCounts,
+            vertices);
+    }
+
+    private static native void buildNative();
+
+    public static void build() {
+        ReplayCaptureHooks.entityBuild();
+        buildNative();
+    }
 
     private static String defaultPostContentName(Constants.PostRenderFlags postRenderFlag) {
         return switch (postRenderFlag) {
