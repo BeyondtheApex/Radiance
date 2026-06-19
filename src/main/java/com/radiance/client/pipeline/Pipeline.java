@@ -43,6 +43,7 @@ public class Pipeline {
     public static Pipeline INSTANCE = new Pipeline();
     public static int eyeCount = 1; // Updated from VRProxy at runtime
     private static final String RAY_TRACING_MODULE_NAME = "render_pipeline.module.ray_tracing.name";
+    private static final String DEFERRED_RT_MODULE_NAME = "render_pipeline.module.deferred_rt.name";
     private static final String RAY_TRACING_SHADER_PACK_PATH_ATTRIBUTE = "render_pipeline.module.ray_tracing.attribute.shader_pack_path";
     private static final String VANILLA_RAY_TRACING_SHADER_PACK_PATH = "shaders/world/ray_tracing/vanilla-pt.zip";
     private static final String RESTIR_RAY_TRACING_SHADER_PACK_PATH = "shaders/world/ray_tracing/restir-di.zip";
@@ -174,6 +175,57 @@ public class Pipeline {
                     POST_RENDER_MODULE_NAME);
         }
 
+        if (Objects.equals(presetName, Presets.DEFERRED_RT.key)) {
+            return areModulesAvailable(
+                    DEFERRED_RT_MODULE_NAME,
+                    TONE_MAPPING_MODULE_NAME,
+                    POST_RENDER_MODULE_NAME);
+        }
+
+        if (Objects.equals(presetName, Presets.DEFERRED_RT_NRD.key)) {
+            return areModulesAvailable(
+                    DEFERRED_RT_MODULE_NAME,
+                    NRD_MODULE_NAME,
+                    TEMPORAL_ACCUMULATION_MODULE_NAME,
+                    TONE_MAPPING_MODULE_NAME,
+                    POST_RENDER_MODULE_NAME);
+        }
+
+        if (Objects.equals(presetName, Presets.DEFERRED_RT_NRD_FSR.key)) {
+            return areModulesAvailable(
+                    DEFERRED_RT_MODULE_NAME,
+                    NRD_MODULE_NAME,
+                    FSR3_MODULE_NAME,
+                    TONE_MAPPING_MODULE_NAME,
+                    POST_RENDER_MODULE_NAME);
+        }
+
+        if (Objects.equals(presetName, Presets.DEFERRED_RT_NRD_XESS.key)) {
+            return areModulesAvailable(
+                    DEFERRED_RT_MODULE_NAME,
+                    NRD_MODULE_NAME,
+                    XESS_MODULE_NAME,
+                    TONE_MAPPING_MODULE_NAME,
+                    POST_RENDER_MODULE_NAME);
+        }
+
+        if (Objects.equals(presetName, Presets.DEFERRED_RT_DLSSRR.key)) {
+            return areModulesAvailable(
+                    DEFERRED_RT_MODULE_NAME,
+                    DLSS_MODULE_NAME,
+                    TONE_MAPPING_MODULE_NAME,
+                    POST_RENDER_MODULE_NAME);
+        }
+
+        return false;
+    }
+
+    private static boolean isKnownPresetName(String presetName) {
+        for (Presets preset : Presets.values()) {
+            if (Objects.equals(preset.key, presetName)) {
+                return true;
+            }
+        }
         return false;
     }
 
@@ -189,6 +241,21 @@ public class Pipeline {
         }
         if (isPresetAvailable(Presets.RT_DLSSRR.key)) {
             return Presets.RT_DLSSRR.key;
+        }
+        if (isPresetAvailable(Presets.DEFERRED_RT_NRD_FSR.key)) {
+            return Presets.DEFERRED_RT_NRD_FSR.key;
+        }
+        if (isPresetAvailable(Presets.DEFERRED_RT_NRD_XESS.key)) {
+            return Presets.DEFERRED_RT_NRD_XESS.key;
+        }
+        if (isPresetAvailable(Presets.DEFERRED_RT_NRD.key)) {
+            return Presets.DEFERRED_RT_NRD.key;
+        }
+        if (isPresetAvailable(Presets.DEFERRED_RT_DLSSRR.key)) {
+            return Presets.DEFERRED_RT_DLSSRR.key;
+        }
+        if (isPresetAvailable(Presets.DEFERRED_RT.key)) {
+            return Presets.DEFERRED_RT.key;
         }
         return null;
     }
@@ -1086,6 +1153,122 @@ public class Pipeline {
         connectOutput(postRenderModule.getOutputImageConfig("post_rendered"));
     }
 
+    public static void assembleDeferredRt() {
+        if (!isPresetAvailable(Presets.DEFERRED_RT.key)) {
+            assembleBestAvailablePreset("Deferred RT preset is unavailable.");
+            return;
+        }
+        assembleDeferredRtInternal();
+    }
+
+    private static void assembleDeferredRtInternal() {
+        clear();
+
+        Module deferredRtModule = addModule(DEFERRED_RT_MODULE_NAME);
+
+        Module toneMappingModule = addModule(TONE_MAPPING_MODULE_NAME);
+
+        Module postRenderModule = addModule(POST_RENDER_MODULE_NAME);
+
+        deferredRtModule.x = 100;
+        deferredRtModule.y = 220;
+        toneMappingModule.x = 380;
+        toneMappingModule.y = 140;
+        postRenderModule.x = 380;
+        postRenderModule.y = 300;
+
+        INSTANCE.activePresetName = Presets.DEFERRED_RT.key;
+
+        connect(deferredRtModule.getOutputImageConfig("radiance"),
+                toneMappingModule.getInputImageConfig("denoised_radiance"));
+        connect(deferredRtModule.getOutputImageConfig("radiance"),
+                postRenderModule.getInputImageConfig("hdr_input"));
+
+        connect(deferredRtModule.getOutputImageConfig("first_hit_depth"),
+                postRenderModule.getInputImageConfig("first_hit_depth"));
+        connect(deferredRtModule.getOutputImageConfig("motion_vector"),
+                postRenderModule.getInputImageConfig("motion_vector"));
+        connect(deferredRtModule.getOutputImageConfig("normal_roughness"),
+                postRenderModule.getInputImageConfig("normal_roughness"));
+
+        connect(toneMappingModule.getOutputImageConfig("mapped_output"),
+                postRenderModule.getInputImageConfig("ldr_input"));
+
+        connectOutput(postRenderModule.getOutputImageConfig("post_rendered"));
+    }
+
+    public static void assembleDeferredRtDLSSRR() {
+        if (!isPresetAvailable(Presets.DEFERRED_RT_DLSSRR.key)) {
+            assembleBestAvailablePreset("Deferred RT DLSS preset is unavailable.");
+            return;
+        }
+        assembleDeferredRtDLSSRRInternal();
+    }
+
+    private static void assembleDeferredRtDLSSRRInternal() {
+        clear();
+
+        Module deferredRtModule = addModule(DEFERRED_RT_MODULE_NAME);
+
+        Module dlssModule = addModule(DLSS_MODULE_NAME);
+
+        Module toneMappingModule = addModule(TONE_MAPPING_MODULE_NAME);
+
+        Module postRenderModule = addModule(POST_RENDER_MODULE_NAME);
+
+        deferredRtModule.x = 100;
+        deferredRtModule.y = 220;
+        dlssModule.x = 380;
+        dlssModule.y = 220;
+        toneMappingModule.x = 660;
+        toneMappingModule.y = 140;
+        postRenderModule.x = 660;
+        postRenderModule.y = 300;
+
+        INSTANCE.activePresetName = Presets.DEFERRED_RT_DLSSRR.key;
+
+        connect(deferredRtModule.getOutputImageConfig("radiance"),
+                dlssModule.getInputImageConfig("radiance"));
+
+        connect(deferredRtModule.getOutputImageConfig("diffuse_albedo_metallic"),
+                dlssModule.getInputImageConfig("diffuse_albedo_metallic"));
+
+        connect(deferredRtModule.getOutputImageConfig("specular_albedo"),
+                dlssModule.getInputImageConfig("specular_albedo"));
+
+        connect(deferredRtModule.getOutputImageConfig("normal_roughness"),
+                dlssModule.getInputImageConfig("normal_roughness"));
+
+        connect(deferredRtModule.getOutputImageConfig("motion_vector"),
+                dlssModule.getInputImageConfig("motion_vector"));
+
+        connect(deferredRtModule.getOutputImageConfig("linear_depth"),
+                dlssModule.getInputImageConfig("linear_depth"));
+
+        connect(deferredRtModule.getOutputImageConfig("specular_hit_depth"),
+                dlssModule.getInputImageConfig("specular_hit_depth"));
+
+        connect(deferredRtModule.getOutputImageConfig("first_hit_depth"),
+                dlssModule.getInputImageConfig("first_hit_depth"));
+
+        connect(dlssModule.getOutputImageConfig("processed"),
+                toneMappingModule.getInputImageConfig("denoised_radiance"));
+        connect(dlssModule.getOutputImageConfig("processed"),
+                postRenderModule.getInputImageConfig("hdr_input"));
+
+        connect(dlssModule.getOutputImageConfig("upscaled_first_hit_depth"),
+                postRenderModule.getInputImageConfig("first_hit_depth"));
+        connect(dlssModule.getOutputImageConfig("upscaled_motion_vector"),
+                postRenderModule.getInputImageConfig("motion_vector"));
+        connect(dlssModule.getOutputImageConfig("upscaled_normal_roughness"),
+                postRenderModule.getInputImageConfig("normal_roughness"));
+
+        connect(toneMappingModule.getOutputImageConfig("mapped_output"),
+                postRenderModule.getInputImageConfig("ldr_input"));
+
+        connectOutput(postRenderModule.getOutputImageConfig("post_rendered"));
+    }
+
     public static void assembleNRDFSR() {
         if (!isPresetAvailable(Presets.RT_NRD_FSR.key)) {
             assembleBestAvailablePreset("NRD+FSR preset is unavailable.");
@@ -1403,6 +1586,242 @@ public class Pipeline {
         connectOutput(postRenderModule.getOutputImageConfig("post_rendered"));
     }
 
+    public static void assembleDeferredRtNRD() {
+        if (!isPresetAvailable(Presets.DEFERRED_RT_NRD.key)) {
+            assembleBestAvailablePreset("Deferred RT NRD preset is unavailable.");
+            return;
+        }
+        assembleDeferredRtNRDInternal();
+    }
+
+    private static void assembleDeferredRtNRDInternal() {
+        clear();
+
+        Module deferredRtModule = addModule(DEFERRED_RT_MODULE_NAME);
+
+        Module denoiserModule = addModule(NRD_MODULE_NAME);
+
+        Module temporalAccumulationModule = addModule(TEMPORAL_ACCUMULATION_MODULE_NAME);
+
+        Module toneMappingModule = addModule(TONE_MAPPING_MODULE_NAME);
+
+        Module postRenderModule = addModule(POST_RENDER_MODULE_NAME);
+
+        deferredRtModule.x = 100;
+        deferredRtModule.y = 220;
+        denoiserModule.x = 380;
+        denoiserModule.y = 120;
+        temporalAccumulationModule.x = 660;
+        temporalAccumulationModule.y = 120;
+        toneMappingModule.x = 940;
+        toneMappingModule.y = 120;
+        postRenderModule.x = 940;
+        postRenderModule.y = 300;
+
+        INSTANCE.activePresetName = Presets.DEFERRED_RT_NRD.key;
+
+        connectDeferredRtToNrd(deferredRtModule, denoiserModule);
+
+        connect(denoiserModule.getOutputImageConfig("denoised_radiance"),
+                temporalAccumulationModule.getInputImageConfig("color"));
+
+        connect(deferredRtModule.getOutputImageConfig("motion_vector"),
+                temporalAccumulationModule.getInputImageConfig("motion"));
+
+        connect(deferredRtModule.getOutputImageConfig("normal_roughness"),
+                temporalAccumulationModule.getInputImageConfig("normal_roughness"));
+
+        connect(temporalAccumulationModule.getOutputImageConfig("accumulated_radiance"),
+                toneMappingModule.getInputImageConfig("denoised_radiance"));
+        connect(temporalAccumulationModule.getOutputImageConfig("accumulated_radiance"),
+                postRenderModule.getInputImageConfig("hdr_input"));
+
+        connect(deferredRtModule.getOutputImageConfig("first_hit_depth"),
+                postRenderModule.getInputImageConfig("first_hit_depth"));
+        connect(deferredRtModule.getOutputImageConfig("motion_vector"),
+                postRenderModule.getInputImageConfig("motion_vector"));
+        connect(deferredRtModule.getOutputImageConfig("normal_roughness"),
+                postRenderModule.getInputImageConfig("normal_roughness"));
+
+        connect(toneMappingModule.getOutputImageConfig("mapped_output"),
+                postRenderModule.getInputImageConfig("ldr_input"));
+
+        connectOutput(postRenderModule.getOutputImageConfig("post_rendered"));
+    }
+
+    public static void assembleDeferredRtNRDFSR() {
+        if (!isPresetAvailable(Presets.DEFERRED_RT_NRD_FSR.key)) {
+            assembleBestAvailablePreset("Deferred RT NRD+FSR preset is unavailable.");
+            return;
+        }
+        assembleDeferredRtNRDFSRInternal();
+    }
+
+    private static void assembleDeferredRtNRDFSRInternal() {
+        clear();
+
+        Module deferredRtModule = addModule(DEFERRED_RT_MODULE_NAME);
+
+        Module denoiserModule = addModule(NRD_MODULE_NAME);
+
+        Module upscalerModule = addModule(FSR3_MODULE_NAME);
+
+        Module toneMappingModule = addModule(TONE_MAPPING_MODULE_NAME);
+
+        Module postRenderModule = addModule(POST_RENDER_MODULE_NAME);
+
+        deferredRtModule.x = 100;
+        deferredRtModule.y = 220;
+        denoiserModule.x = 380;
+        denoiserModule.y = 120;
+        upscalerModule.x = 660;
+        upscalerModule.y = 220;
+        toneMappingModule.x = 940;
+        toneMappingModule.y = 120;
+        postRenderModule.x = 940;
+        postRenderModule.y = 300;
+
+        INSTANCE.activePresetName = Presets.DEFERRED_RT_NRD_FSR.key;
+
+        connectDeferredRtToNrd(deferredRtModule, denoiserModule);
+
+        connect(denoiserModule.getOutputImageConfig("denoised_radiance"),
+                upscalerModule.getInputImageConfig("color"));
+
+        connectDeferredRtToUpscaler(deferredRtModule, upscalerModule);
+
+        connect(upscalerModule.getOutputImageConfig("upscaled_radiance"),
+                toneMappingModule.getInputImageConfig("denoised_radiance"));
+        connect(upscalerModule.getOutputImageConfig("upscaled_radiance"),
+                postRenderModule.getInputImageConfig("hdr_input"));
+        connect(upscalerModule.getOutputImageConfig("upscaled_first_hit_depth"),
+                postRenderModule.getInputImageConfig("first_hit_depth"));
+        connect(upscalerModule.getOutputImageConfig("upscaled_motion_vector"),
+                postRenderModule.getInputImageConfig("motion_vector"));
+        connect(upscalerModule.getOutputImageConfig("upscaled_normal_roughness"),
+                postRenderModule.getInputImageConfig("normal_roughness"));
+
+        connect(toneMappingModule.getOutputImageConfig("mapped_output"),
+                postRenderModule.getInputImageConfig("ldr_input"));
+
+        connectOutput(postRenderModule.getOutputImageConfig("post_rendered"));
+    }
+
+    public static void assembleDeferredRtNRDXESS() {
+        if (!isPresetAvailable(Presets.DEFERRED_RT_NRD_XESS.key)) {
+            assembleBestAvailablePreset("Deferred RT NRD+XeSS preset is unavailable.");
+            return;
+        }
+        assembleDeferredRtNRDXESSInternal();
+    }
+
+    private static void assembleDeferredRtNRDXESSInternal() {
+        clear();
+
+        Module deferredRtModule = addModule(DEFERRED_RT_MODULE_NAME);
+
+        Module denoiserModule = addModule(NRD_MODULE_NAME);
+
+        Module upscalerModule = addModule(XESS_MODULE_NAME);
+
+        Module toneMappingModule = addModule(TONE_MAPPING_MODULE_NAME);
+
+        Module postRenderModule = addModule(POST_RENDER_MODULE_NAME);
+
+        deferredRtModule.x = 100;
+        deferredRtModule.y = 220;
+        denoiserModule.x = 380;
+        denoiserModule.y = 120;
+        upscalerModule.x = 660;
+        upscalerModule.y = 220;
+        toneMappingModule.x = 940;
+        toneMappingModule.y = 120;
+        postRenderModule.x = 940;
+        postRenderModule.y = 300;
+
+        INSTANCE.activePresetName = Presets.DEFERRED_RT_NRD_XESS.key;
+
+        connectDeferredRtToNrd(deferredRtModule, denoiserModule);
+
+        connect(denoiserModule.getOutputImageConfig("denoised_radiance"),
+                upscalerModule.getInputImageConfig("color"));
+
+        connectDeferredRtToUpscaler(deferredRtModule, upscalerModule);
+
+        connect(upscalerModule.getOutputImageConfig("upscaled_radiance"),
+                toneMappingModule.getInputImageConfig("denoised_radiance"));
+        connect(upscalerModule.getOutputImageConfig("upscaled_radiance"),
+                postRenderModule.getInputImageConfig("hdr_input"));
+        connect(upscalerModule.getOutputImageConfig("upscaled_first_hit_depth"),
+                postRenderModule.getInputImageConfig("first_hit_depth"));
+        connect(upscalerModule.getOutputImageConfig("upscaled_motion_vector"),
+                postRenderModule.getInputImageConfig("motion_vector"));
+        connect(upscalerModule.getOutputImageConfig("upscaled_normal_roughness"),
+                postRenderModule.getInputImageConfig("normal_roughness"));
+
+        connect(toneMappingModule.getOutputImageConfig("mapped_output"),
+                postRenderModule.getInputImageConfig("ldr_input"));
+
+        connectOutput(postRenderModule.getOutputImageConfig("post_rendered"));
+    }
+
+    private static void connectDeferredRtToNrd(Module deferredRtModule, Module denoiserModule) {
+        connect(deferredRtModule.getOutputImageConfig("first_hit_diffuse_indirect_light"),
+                denoiserModule.getInputImageConfig("diffuse_radiance"));
+
+        connect(deferredRtModule.getOutputImageConfig("first_hit_specular"),
+                denoiserModule.getInputImageConfig("specular_radiance"));
+
+        connect(deferredRtModule.getOutputImageConfig("first_hit_diffuse_direct_light"),
+                denoiserModule.getInputImageConfig("direct_radiance"));
+
+        connect(deferredRtModule.getOutputImageConfig("diffuse_albedo_metallic"),
+                denoiserModule.getInputImageConfig("diffuse_albedo"));
+
+        connect(deferredRtModule.getOutputImageConfig("specular_albedo"),
+                denoiserModule.getInputImageConfig("specular_albedo"));
+
+        connect(deferredRtModule.getOutputImageConfig("normal_roughness"),
+                denoiserModule.getInputImageConfig("normal_roughness"));
+
+        connect(deferredRtModule.getOutputImageConfig("motion_vector"),
+                denoiserModule.getInputImageConfig("motion_vector"));
+
+        connect(deferredRtModule.getOutputImageConfig("linear_depth"),
+                denoiserModule.getInputImageConfig("linear_depth"));
+
+        connect(deferredRtModule.getOutputImageConfig("first_hit_clear"),
+                denoiserModule.getInputImageConfig("first_hit_clear"));
+
+        connect(deferredRtModule.getOutputImageConfig("first_hit_base_emission"),
+                denoiserModule.getInputImageConfig("first_hit_base_emission"));
+
+        connect(deferredRtModule.getOutputImageConfig("fog_image"),
+                denoiserModule.getInputImageConfig("fog_image"));
+
+        connect(deferredRtModule.getOutputImageConfig("gi_hit_distance"),
+                denoiserModule.getInputImageConfig("diffuseHitDepthImage"));
+
+        connect(deferredRtModule.getOutputImageConfig("specular_hit_depth"),
+                denoiserModule.getInputImageConfig("specularHitDepthImage"));
+
+        connect(deferredRtModule.getOutputImageConfig("first_hit_refraction"),
+                denoiserModule.getInputImageConfig("first_hit_refraction"));
+    }
+
+    private static void connectDeferredRtToUpscaler(Module deferredRtModule, Module upscalerModule) {
+        connect(deferredRtModule.getOutputImageConfig("linear_depth"),
+                upscalerModule.getInputImageConfig("depth"));
+
+        connect(deferredRtModule.getOutputImageConfig("first_hit_depth"),
+                upscalerModule.getInputImageConfig("first_hit_depth"));
+
+        connect(deferredRtModule.getOutputImageConfig("motion_vector"),
+                upscalerModule.getInputImageConfig("motion_vector"));
+        connect(deferredRtModule.getOutputImageConfig("normal_roughness"),
+                upscalerModule.getInputImageConfig("normal_roughness"));
+    }
+
     private static void assemblePresetByKeyInternal(String presetName) {
         if (Objects.equals(presetName, Presets.RT_DLSSRR.key)) {
             assembleDLSSRRInternal();
@@ -1421,6 +1840,31 @@ public class Pipeline {
 
         if (Objects.equals(presetName, Presets.RT_NRD_XESS.key)) {
             assembleNRDXESSInternal();
+            return;
+        }
+
+        if (Objects.equals(presetName, Presets.DEFERRED_RT.key)) {
+            assembleDeferredRtInternal();
+            return;
+        }
+
+        if (Objects.equals(presetName, Presets.DEFERRED_RT_NRD.key)) {
+            assembleDeferredRtNRDInternal();
+            return;
+        }
+
+        if (Objects.equals(presetName, Presets.DEFERRED_RT_NRD_FSR.key)) {
+            assembleDeferredRtNRDFSRInternal();
+            return;
+        }
+
+        if (Objects.equals(presetName, Presets.DEFERRED_RT_NRD_XESS.key)) {
+            assembleDeferredRtNRDXESSInternal();
+            return;
+        }
+
+        if (Objects.equals(presetName, Presets.DEFERRED_RT_DLSSRR.key)) {
+            assembleDeferredRtDLSSRRInternal();
             return;
         }
 
@@ -1756,10 +2200,7 @@ public class Pipeline {
             requestedPresetName = Presets.RT_DLSSRR.key;
         }
 
-        if (!Objects.equals(requestedPresetName, Presets.RT_DLSSRR.key)
-                && !Objects.equals(requestedPresetName, Presets.RT_NRD.key)
-                && !Objects.equals(requestedPresetName, Presets.RT_NRD_FSR.key)
-                && !Objects.equals(requestedPresetName, Presets.RT_NRD_XESS.key)) {
+        if (!isKnownPresetName(requestedPresetName)) {
             requestedPresetName = Presets.RT_DLSSRR.key;
         }
 

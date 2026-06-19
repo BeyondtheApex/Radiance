@@ -1020,17 +1020,10 @@ public class RenderPipelineScreen extends Screen {
 
     private void registerDefaultPresets() {
         this.presets.clear();
-        if (Pipeline.isPresetAvailable(Presets.RT_DLSSRR.key)) {
-            this.presets.add(new PresetEntry(Presets.RT_DLSSRR.key));
-        }
-        if (Pipeline.isPresetAvailable(Presets.RT_NRD.key)) {
-            this.presets.add(new PresetEntry(Presets.RT_NRD.key));
-        }
-        if (Pipeline.isPresetAvailable(Presets.RT_NRD_FSR.key)) {
-            this.presets.add(new PresetEntry(Presets.RT_NRD_FSR.key));
-        }
-        if (Pipeline.isPresetAvailable(Presets.RT_NRD_XESS.key)) {
-            this.presets.add(new PresetEntry(Presets.RT_NRD_XESS.key));
+        for (Presets preset : Presets.values()) {
+            if (Pipeline.isPresetAvailable(preset.key)) {
+                this.presets.add(new PresetEntry(preset.key));
+            }
         }
     }
 

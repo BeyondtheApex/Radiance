@@ -1079,3 +1079,57 @@ Status: in progress
   - Add a dedicated diagnostics UI or configurable overlay if the F3 text becomes too dense.
   - Feed diagnostics into the future offline runner or scene-frame dump path.
   - Extend diagnostics after `transparent_forward` / refraction exists so translucent work has pass-specific counters.
+
+### Step 28: Deferred RT Java Preset Wiring
+
+- Status: completed.
+- Target files:
+  - `Radiance-custom/src/main/java/com/radiance/client/pipeline/Presets.java`
+  - `Radiance-custom/src/main/java/com/radiance/client/pipeline/Pipeline.java`
+  - `Radiance-custom/src/main/java/com/radiance/client/gui/RenderPipelineScreen.java`
+  - `Radiance-custom/src/main/resources/assets/radiance/lang/en_us.json`
+  - `Radiance-custom/src/main/resources/assets/radiance/lang/zh_cn.json`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Earlier milestones made Deferred RT renderable through manual graph construction, but preset mode still exposed only PT routes.
+  - The Java pipeline already supports dynamic preset switching, so Deferred RT needs first-class preset entries before normal UI smoke testing and before shaderpack runtime work can be evaluated in the same workflow as PT.
+  - NRD wiring must honor the Deferred RT hit-distance contract: `gi_hit_distance` is diffuse/GI secondary-hit distance, while `first_hit_depth` remains primary surface depth.
+- Implemented:
+  - Added Deferred RT preset enum entries:
+    - `DEFERRED_RT`,
+    - `DEFERRED_RT_NRD`,
+    - `DEFERRED_RT_NRD_FSR`,
+    - `DEFERRED_RT_NRD_XESS`,
+    - `DEFERRED_RT_DLSSRR`.
+  - Added `DEFERRED_RT_MODULE_NAME` and availability checks for Deferred RT, NRD, FSR, XeSS and DLSSRR routes.
+  - Added Java graph assembly for:
+    - `Deferred RT -> ToneMapping -> PostRender`,
+    - `Deferred RT -> NRD -> TemporalAccumulation -> ToneMapping -> PostRender`,
+    - `Deferred RT -> NRD -> FSR -> ToneMapping/PostRender`,
+    - `Deferred RT -> NRD -> XeSS -> ToneMapping/PostRender`,
+    - `Deferred RT -> DLSSRR -> ToneMapping/PostRender`.
+  - Added `connectDeferredRtToNrd(...)` so the Deferred RT NRD semantic exception is centralized:
+    - `deferred_rt.gi_hit_distance -> nrd.diffuseHitDepthImage`,
+    - `deferred_rt.specular_hit_depth -> nrd.specularHitDepthImage`,
+    - `deferred_rt.first_hit_depth` is not connected to NRD diffuse hit depth.
+  - Added `connectDeferredRtToUpscaler(...)` for FSR/XeSS primary scene-fact propagation:
+    - `linear_depth -> depth`,
+    - `first_hit_depth -> first_hit_depth`,
+    - `motion_vector -> motion_vector`,
+    - `normal_roughness -> normal_roughness`.
+  - Kept existing PT presets unchanged, including their historical `ray_tracing.first_hit_depth -> nrd.diffuseHitDepthImage` wiring.
+  - Updated `processPresetName(...)` to recognize every `Presets` enum value instead of only the four old PT presets.
+  - Updated the preset UI registration to enumerate available `Presets` values rather than hard-coding four PT entries.
+  - Added English and Chinese translation keys for the new Deferred RT presets.
+  - Kept the fallback/default order PT-first, then Deferred RT, so existing configs do not silently move to the experimental raster path. Explicit user selection and stored Deferred RT presets still work if modules are available.
+- Verification:
+  - `gradlew.bat classes` completed successfully with `JAVA_HOME=C:\Program Files\Zulu\zulu-21`.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully. This step did not change native source, but the Deferred RT CPU regression suite was rebuilt.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 6/6 tests passed.
+  - Static diff review confirmed Deferred RT NRD presets connect `gi_hit_distance` to `diffuseHitDepthImage`; only existing PT preset code still connects `first_hit_depth` to that NRD input.
+- Remaining work:
+  - Add a Java-side graph/preset unit test harness if the project later grows test infrastructure for pipeline assembly; currently this is covered by compile-time checks and runtime graph validation.
+  - Run an in-game smoke test after selecting the simplest Deferred RT preset once the user is ready to launch Minecraft.
+  - Deferred shaderpack runtime is still not implemented. This step only makes Deferred RT selectable through the same Java preset structure as PT.
+  - The PT and Deferred RT preset families now coexist, but shared shaderpack discovery still targets PT packs only. Deferred shaderpack metadata/runtime remains a later planned step.

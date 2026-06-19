@@ -460,13 +460,17 @@ worldModuleInOutImageNums.insert(std::make_pair(
 
 ### 4.8 Pipeline Presets
 
-Add presets on the Java side:
+Current Java presets include the existing PT paths and the Deferred RT paths as separate selectable entries:
 
-- `Deferred RT + NRD + ToneMapping + PostRender`
-- `Deferred RT + TemporalAccumulation + ToneMapping + PostRender`
-- later: `Deferred RT + NRD + FSR/XeSS/DLSS`
+- `Deferred RT -> ToneMapping -> PostRender`
+- `Deferred RT -> NRD -> TemporalAccumulation -> ToneMapping -> PostRender`
+- `Deferred RT -> NRD -> FSR -> ToneMapping/PostRender`
+- `Deferred RT -> NRD -> XeSS -> ToneMapping/PostRender`
+- `Deferred RT -> DLSSRR -> ToneMapping/PostRender`
 
-The first preset should connect outputs exactly like the current PT preset. This keeps the first implementation focused on the module, not downstream rewiring.
+The existing PT presets remain unchanged. That is intentional: PT still uses its historical `ray_tracing.first_hit_depth -> nrd.diffuseHitDepthImage` connection until a separate PT migration is planned. Deferred RT must not copy that ambiguity. Its NRD presets connect `deferred_rt.gi_hit_distance -> nrd.diffuseHitDepthImage`, while `deferred_rt.first_hit_depth` remains primary-surface depth for PostRender and upscaler scene-fact propagation.
+
+The preset UI enumerates available `Presets` values through `Pipeline.isPresetAvailable(...)`; adding a new preset should require one enum entry, availability rules, graph assembly, and translation keys. The default/fallback order still prefers the stable PT presets first, then falls back to Deferred RT presets if PT paths are unavailable. This prevents existing configs from silently moving to the experimental raster path while still allowing explicit dynamic switching between PT and Deferred RT.
 
 ### 4.9 VR / Layered Output Contract
 
