@@ -1002,3 +1002,45 @@ Status: in progress
   - Wire `latestDiagnosticsSnapshot()` to a native log path, an in-game debug overlay or the future offline runner. Step 25 deliberately only adds the shared native data surface.
   - Add a runtime policy for when diagnostics formatting is emitted so normal gameplay does not log every frame by default.
   - Extend diagnostics after `transparent_forward` exists so translucent/refraction work has pass-specific counters instead of only provider routing counts.
+
+### Step 26: Deferred RT Diagnostics Log Control
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_diagnostics.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_diagnostics.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/tests/deferred_rt_diagnostics_test.cpp`
+  - `Radiance-custom/src/main/resources/modules/deferred_rt.yaml`
+  - `Radiance-custom/src/main/resources/assets/radiance/lang/en_us.json`
+  - `Radiance-custom/src/main/resources/assets/radiance/lang/zh_cn.json`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+- Reason for this step:
+  - Step 25 created the shared diagnostics snapshot, but there was still no controlled runtime path to inspect it during real frames.
+  - The first visible diagnostics surface should be opt-in and throttled so normal gameplay does not format or print diagnostics every frame.
+  - The throttle must not use `frameIndex`, because that value is the swapchain frame slot and wraps every few frames.
+- Implemented:
+  - Added Deferred RT module attributes:
+    - `render_pipeline.module.deferred_rt.attribute.diagnostics_log`, default `render_pipeline.false`,
+    - `render_pipeline.module.deferred_rt.attribute.diagnostics_log_interval`, default `120`, range `1-600`.
+  - Added English and Chinese translations for the Deferred RT module name and both diagnostics attributes.
+  - Implemented `DeferredRtModule::setAttributes(...)` handling for the new diagnostics attributes.
+  - Added a module-level completed diagnostics snapshot sequence and last-log sequence.
+  - Added `DeferredRtModule::maybeLogDiagnosticsSnapshot()`:
+    - default-off,
+    - logs the first completed snapshot immediately after the attribute is enabled,
+    - then logs only after the configured number of completed snapshots,
+    - prints the compact Step 25 diagnostics format with a `[DeferredRT]` prefix.
+  - Added `deferredRtDiagnosticsShouldLog(...)` as a small CPU helper and extended `deferred_rt_diagnostics_test` to cover first-log and interval behavior, including defensive zero-interval clamping.
+  - Updated the architecture document to reflect that native log export now exists, while overlay/offline-runner export remains future work.
+- Verification:
+  - `gradlew.bat classes` completed successfully in `Radiance-custom`.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 6/6 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed `core.dll` plus current shader resources.
+- Remaining work:
+  - Add an in-game diagnostics/debug overlay that reads the same snapshot without requiring log output.
+  - Feed diagnostics into the future offline runner or scene-frame dump path so replay captures can preserve selected shaderpack, attributes and fallback classification.
+  - Extend diagnostics after `transparent_forward` / refraction is implemented so routed translucent content has pass-specific counters instead of only provider routing counts.

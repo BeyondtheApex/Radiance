@@ -33,4 +33,10 @@ outputImageConfigs:
     format: "R16G16B16A16_SFLOAT"
   - name: "gi_hit_distance"
     format: "R16_SFLOAT"
-attributeConfigs: [ ]
+attributeConfigs:
+  - name: "render_pipeline.module.deferred_rt.attribute.diagnostics_log"
+    type: "bool"
+    value: "render_pipeline.false"
+  - name: "render_pipeline.module.deferred_rt.attribute.diagnostics_log_interval"
+    type: "int_range:1-600"
+    value: "120"
