@@ -1876,3 +1876,92 @@ Status: in progress
     ray-query fallback selection errors.
   - Step 41 should implement explicit resource lifetime policy, including real history resources and reset rules.
   - Only after these public schema gaps are closed should work resume on the larger shared scene runtime route.
+
+### Step 40: Common Definitions and Feature Requirements
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_shaderpack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_shaderpack.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/core/vulkan/device.hpp`
+  - `MCVR-custom/src/core/vulkan/device.cpp`
+  - `MCVR-custom/tests/shader_pack_deferred_schema_test.cpp`
+  - `MCVR-custom/tests/deferred_rt_shaderpack_test.cpp`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Step 38 and Step 39 made Deferred packs author passes, insertions and logical resources without exposing raw command
+    lists, descriptor bindings or barriers.
+  - Shaderpack authors still needed a common macro layer for all shaders and a device-capability model for feature-gated
+    packs and passes.
+  - Ray-query lighting slots already had `fallback_compute`, but unsupported devices still needed validation errors that
+    speak in public schema terms instead of failing later during command recording or pipeline creation.
+- Implemented:
+  - Added root/common shader definitions using the existing definitions aliases:
+    - `define`,
+    - `defines`,
+    - `definitions`.
+  - Root definitions are stored as common shader definitions and merged into all shader compile requests before
+    attribute definitions, pass/request definitions and runtime resource binding definitions.
+  - Existing pass definitions still work and can override root/common definitions for that pass.
+  - Added first-version capability requirements parsing from root, pass and slot declarations through public JSON
+    `requires`.
+  - Supported capability spellings:
+    - `"ray_query"`,
+    - `"multiview"`,
+    - `"half_precision"`,
+    - `"storage_image_format:<format>"`, such as `storage_image_format:r16f`,
+    - object form such as `{ "capability": "storage_image_format", "format": "r16f" }`.
+  - Slot-level `requires` works because slots are normalized into normal Deferred pass configs with the slot semantic
+    injected by the public-schema parser.
+  - Backend blocks merge parent and backend `requires` arrays during parsing so backend-specific metadata is preserved
+    for later variant work.
+  - Added native device capability queries used by Deferred runtime validation:
+    - ray query support,
+    - multiview support,
+    - shader float16 support,
+    - storage image format support via physical-device format properties.
+  - Added a Deferred runtime capability object and kept the older bool ray-query overload for existing tests and callers.
+  - Deferred runtime-plan validation now checks:
+    - root/pack requirements as hard pack requirements,
+    - pass/slot requirements as pass availability requirements,
+    - unsupported referenced passes as runtime-plan errors with public capability names.
+  - Ray-query pass fallback policy is now explicit:
+    - if the device supports ray query, use the ray-query compute shader,
+    - if the device lacks ray query and the pass declares `fallback_compute`, the runtime pass remains valid and uses the
+      fallback pipeline,
+    - if the device lacks ray query and the pass has no fallback, the plan fails with a clear missing
+      `ray_query`/`fallback_compute` error.
+  - Root-level `requires: ray_query` remains a hard pack requirement. It is not satisfied by individual pass fallback
+    shaders.
+  - Added loader tests for root common definitions, pass definition override, root/pass `requires` parsing and unknown
+    capability rejection.
+  - Added runtime-plan tests for unsupported root requirements, unsupported pass requirements, storage image format
+    requirements and ray-query pass fallback with an explicit `requires: ray_query`.
+- Deliberately deferred:
+  - A full variant/permutation matrix is still not implemented. Step 40 keeps the schema extensible by preserving
+    `requires` metadata on backend configs, but it does not choose among arbitrary quality/backend variants.
+  - A generic `fallback` object/key is not implemented. Current executable fallback behavior remains the existing
+    `fallback_compute` field on `ray_query` compute-style passes.
+  - Backend-specific requirement selection is not a general policy yet. First-version runtime validation is pack/pass/slot
+    level; richer backend selection belongs with the future permutation/variant model.
+  - Resource lifetime policy remains Step 41. `per_frame`, `history`, `persistent` and `imported_texture` are not
+    promoted to an explicit schema in this step.
+  - Debug output registry and offline lint/expanded graph report remain future tooling work, including unsupported
+    feature warning reports outside module initialization.
+  - Deferred built-in empty-path `getAttributes()` parity with PT remains open.
+- Verification:
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target deferred_rt_shaderpack_test -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target shader_pack_deferred_schema_test -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `G:\cpp\radiance\MCVR-custom\build-radiance-custom\tests\Release\deferred_rt_shaderpack_test.exe` completed successfully.
+  - `G:\cpp\radiance\MCVR-custom\build-radiance-custom\tests\Release\shader_pack_deferred_schema_test.exe` completed successfully.
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully with `D:\VulkanSDK\1.4.335.0\Bin` prepended to `PATH`.
+  - `ctest --test-dir G:\cpp\radiance\MCVR-custom\build-radiance-custom -C Release --output-on-failure` completed successfully: 10/10 tests passed.
+- Remaining work:
+  - Step 41 should implement explicit resource lifetime policy, including real history resources and reset rules.
+  - Full variants/permutations, generic fallback policy, debug outputs and offline lint/expanded graph reporting remain
+    future public-schema/tooling work.
+  - Only after Step 41 is closed should work resume on the larger shared scene runtime route.

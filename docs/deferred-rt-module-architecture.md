@@ -3153,21 +3153,24 @@ Implementation steps:
   - SBT-style shader/hit fields, completed in Step 29,
   - PT hit groups, completed in Step 29.
 
-Remaining implementation steps after Step 38:
+Remaining implementation steps after Step 40:
 
 - Deferred fixed semantic order validation while the runtime still accepts raw `execution.deferred.commands` is complete
   in Step 37.
 - Public-schema parsing for complete `slots`, custom `passes`, phase `insertions`, custom pass type limits and internal
   command-list generation is complete in Step 38.
+- Deferred logical resources, `resources.images` / `resources.textures` / `resources.buffers` lowering, `custom.*`
+  namespace validation, phase visibility and custom pass read/write validation are complete in Step 39.
+- Root/common definitions and first-version `requires` capability validation are complete in Step 40. The current
+  capability set is `ray_query`, `multiview`, `half_precision` and `storage_image_format:<format>`.
+- Add explicit resource lifetime policy, including `per_frame`, `history`, `persistent`, `imported_texture`, temporal
+  current/previous descriptor naming and resize/reload/world-change resets.
 - Move `ScenePrepare` and `SceneProviderFactory` lifetime to `WorldPipeline` scope so PT and Deferred can share prepared scene runtime without per-module duplication.
-- Add `resources` logical-resource registry and validation for Deferred-stage internal images, public exports, scene draw
-  streams and pack-owned logical resources.
-- Add phase visibility, read/write dependency validation, generated descriptor binding maps and generated barrier-plan
-  reporting for custom pass `inputs`/`outputs`.
 - Expand preset storage/UI so a preset can configure the selected pipeline and each shaderpack-capable module's pack.
 - Define whether cross-module shaderpack resource references are forbidden by validation or represented through explicit
   public pipeline resources. The current design assumes no implicit cross-module shaderpack runtime resources.
-- Add a shaderpack lint/offline parser tool that can validate a Deferred pack without launching Minecraft.
+- Add generated descriptor binding map and barrier-plan reporting to the future shaderpack lint/offline parser tool so a
+  Deferred pack can be validated without launching Minecraft.
 - Add game, VR and preset switching tests for the built-in Deferred pack.
 
 Completion standard:
@@ -3274,14 +3277,19 @@ Required authoring features:
 - Defines/permutations:
   - Reuse pass-level `define`, `defines`, or `definitions`, and attribute-level `define`, for simple compile-time
     switches such as `RADIANCE_HIGH_QUALITY_GI` and `RADIANCE_USE_BLUE_NOISE`.
-  - Add common/root definitions only if they can merge into the same existing definitions model without creating a
-    second syntax.
-  - Variant/permutation support can stay minimal in the first version, but the schema should not block
-    `quality: low/medium/high/ultra` style variants later.
+  - Step 40 adds common/root definitions through the same existing aliases. Root definitions merge into every shader
+    compile request before attribute definitions, pass/request definitions and generated runtime-resource definitions.
+  - Variant/permutation support is still future work. The current schema preserves backend/pass `requires` metadata so a
+    later `quality: low/medium/high/ultra` or backend variant model can be added without changing the logical resource
+    graph.
 - Feature requirements/fallbacks:
-  - Declare required capabilities and fallback policy at pack/pass/slot level: ray query, multiview, storage image
-    format support, half precision and similar device-dependent features.
-  - The runtime must choose supported fallback shaders or fail at build/lint time with a precise error.
+  - Step 40 implements first-version `requires` at pack/root, pass and slot level. Supported capabilities are
+    `ray_query`, `multiview`, `half_precision` and `storage_image_format:<format>`.
+  - Root requirements are hard pack requirements. Pass/slot requirements gate that runtime pass and produce a precise
+    runtime-plan error if an executed pass is unsupported.
+  - Ray-query passes use their ray-query shader when the device supports ray query, use `fallback_compute` when ray query
+    is unavailable and a fallback is declared, and fail validation when neither path is available.
+  - A generic fallback object/key and a full backend permutation matrix are not implemented yet.
 - Resource lifetime policy:
   - Existing resources already distinguish imported file textures, intermediate runtime resources and `shared` resources.
     Preserve that syntax.
@@ -3323,12 +3331,21 @@ Completion standard:
 
 #### 6.3 Add ray-query backend selection
 
-Implementation steps:
+Implementation status:
 
-- Add feature declarations:
+- Step 40 adds first-version feature declarations:
   - `requires: ray_query`,
-  - `fallback: compute`,
-  - backend tags for Vulkan/Metal/DX12/WebGPU future support.
+  - `requires: multiview`,
+  - `requires: half_precision`,
+  - `requires: storage_image_format:<format>`.
+- Existing `ray_query` passes continue to use `fallback_compute` as the executable fallback shader path.
+- `DeferredRtModule` builds the runtime plan from actual Vulkan device capabilities and reports unsupported packs or
+  referenced passes before command recording.
+
+Remaining implementation steps:
+
+- Add a generic fallback object/key only if a future pass type needs more than the current `fallback_compute` path.
+- Add backend tags for Vulkan/Metal/DX12/WebGPU future support.
 - Validate query kinds:
   - `visibility`,
   - `closest_hit`.
@@ -3336,9 +3353,11 @@ Implementation steps:
 
 Completion standard:
 
-- Vulkan ray-query path selects ray-query shaders.
-- No-ray-query fallback selects fallback shaders or fails with a useful missing-feature error.
-- Backend selection is deterministic and covered by tests.
+- Vulkan ray-query path selects ray-query shaders. Completed for Deferred ray-query compute passes.
+- No-ray-query fallback selects fallback shaders or fails with a useful missing-feature error. Completed for
+  `fallback_compute`.
+- Backend selection is deterministic and covered by tests. First-version capability validation is covered by
+  `deferred_rt_shaderpack_test`; full backend/permutation selection remains future work.
 
 #### 6.4 Build `vanilla-deferred-rt`
 
