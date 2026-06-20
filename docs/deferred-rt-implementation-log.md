@@ -1680,3 +1680,97 @@ Status: in progress
   - Deferred should not introduce a second attribute/uniform syntax. If a new Deferred public schema needs to normalize
     data internally, the author-facing syntax should stay compatible with the existing PT ShaderPack schema unless there
     is no existing equivalent.
+
+### Step 38: Deferred Public Schema Parser/Normalizer
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.cpp`
+  - `MCVR-custom/src/shader/world/deferred_rt/internal/vanilla-deferred-rt/configs.json`
+  - `MCVR-custom/tests/CMakeLists.txt`
+  - `MCVR-custom/tests/shader_pack_deferred_schema_test.cpp`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Step 37 established that raw `execution.deferred.commands` is a runtime IR, not the long-term Deferred authoring
+    surface.
+  - Shaderpack authors need stable extension points: fixed semantic slots for the backbone, custom passes inserted at
+    named phases, and logical resources validated by C++ instead of hand-written command lists, descriptors or barriers.
+  - This step implements the parser/normalizer part first so the built-in pack and tests use the public schema shape
+    before resource graph validation is layered on top.
+- Implemented:
+  - Added root `slots` parsing for the fixed Deferred backbone:
+    - `clear_contract`,
+    - `gbuffer`,
+    - `classify`,
+    - `build_lighting_queues`,
+    - `direct_light`,
+    - `reflection`,
+    - `gi`,
+    - `compose`.
+  - Slot keys are normalized as fixed semantics; each slot is parsed as a normal pass with `stage: deferred` and
+    `semantic` injected from the slot key.
+  - A slot that explicitly declares a mismatched `semantic` now fails during load.
+  - First-version public schema requires a complete 8-slot backbone. There is no overlay/inherit-built-in-slot mode yet.
+  - Slot validation now checks semantic-specific pass type and schedule:
+    - `gbuffer` must be `render` with `content: minecraft_gbuffer` and the supported Deferred render backends,
+    - `clear_contract`, `classify` and `compose` must be `compute` with `screen` schedule,
+    - `build_lighting_queues` must be `compute` with `tile_grid` schedule,
+    - `direct_light` must be `ray_query` with `screen` schedule,
+    - `reflection` and `gi` must be `ray_query` with their matching `lighting_queue` queue.
+  - Added root `insertions` parsing for named phase lists:
+    - `after_clear` / `after_clear_contract`,
+    - `after_gbuffer`,
+    - `after_classify` / `after_classification`,
+    - `after_lighting_queues` / `after_queue` / `after_queues`,
+    - `before_compose`,
+    - `after_compose`.
+  - Public-schema root `passes` is now treated as the custom Deferred pass list. Missing custom pass `stage` defaults to
+    `deferred`.
+  - First-version custom passes are restricted to:
+    - `compute`, or
+    - `full_screen` with only `compute_3d` backends.
+  - Custom passes cannot declare a fixed backbone `semantic`, cannot use `lighting_queue` schedule, must have
+    `local_size.z == 1`, and must be inserted exactly once.
+  - Unknown insertion phase names, unknown custom pass references, duplicate insertion references and uninserted custom
+    passes now fail at shaderpack load time.
+  - Public schema rejects author-written `root.execution.deferred` and `root.execution_deferred`; C++ generates the
+    internal `deferredExecution.commands` list in canonical backbone order plus phase insertions.
+  - Converted built-in `vanilla-deferred-rt/configs.json` from raw `passes` plus `execution.deferred.commands` to the
+    new `slots` schema.
+  - Added `shader_pack_deferred_schema_test` as a loader-only schema test target. It compiles `shader_pack.cpp` with a
+    `MCVR_SHADER_PACK_LOADER_ONLY` definition so parser tests do not link the Vulkan runtime half of `ShaderPack`.
+  - The new test uses explicit runtime checks instead of `assert`, so Release builds still exercise the schema failures.
+- Validation covered by tests:
+  - Complete slots generate the canonical internal Deferred command order.
+  - Custom compute and full-screen compute insertions are placed at their requested phases.
+  - Manual Deferred execution is rejected when public schema is used.
+  - Missing/unknown slots, slot type mismatches, slot schedule mismatches and explicit slot semantic mismatches fail.
+  - Unsupported custom render passes fail.
+  - Custom passes that are not inserted, inserted more than once, use layered `local_size.z`, or include a graphics
+    full-screen backend variant fail.
+  - The source-tree built-in `vanilla-deferred-rt` pack loads through `slots` and expands to the 8-pass backbone.
+- Deliberately deferred:
+  - The `resources` wrapper and logical resource registry are not implemented in this step. Existing root `textures`
+    and `buffers` remain the runtime resource syntax until Step 39 adds the Deferred logical registry on top of the
+    existing model.
+  - `inputs` / `outputs` are parsed and preserved, but phase visibility, read/write dependency checks, custom namespace
+    validation and generated descriptor/barrier reports are still Step 39 work.
+  - Root/common definitions and explicit feature requirements/fallback validation remain Step 40 work.
+  - Resource lifetime policy, including `history`, remains Step 41 work.
+  - Debug output registry and offline lint/expanded graph report are still future tooling work.
+  - Deferred built-in empty-path `getAttributes()` parity with PT remains open: the UI/preset attribute path should
+    load `vanilla-deferred-rt` instead of returning an empty list when the configured Deferred shaderpack path is empty.
+- Verification:
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target shader_pack_deferred_schema_test -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `G:\cpp\radiance\MCVR-custom\build-radiance-custom\tests\Release\shader_pack_deferred_schema_test.exe` completed successfully.
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully with `D:\VulkanSDK\1.4.335.0\Bin` prepended to `PATH`.
+  - `D:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe --test-dir G:\cpp\radiance\MCVR-custom\build-radiance-custom -C Release --output-on-failure` completed successfully: 10/10 tests passed.
+- Remaining work:
+  - Step 39 should implement Deferred logical resources and phase visibility validation using the existing
+    texture/buffer runtime path where possible.
+  - Step 40 should implement common/root definitions plus pack/pass/slot `requires` capability validation and
+    ray-query fallback selection errors.
+  - Step 41 should implement explicit resource lifetime policy, including real history resources and reset rules.
+  - Only after these public schema gaps are closed should work resume on the larger shared scene runtime route.

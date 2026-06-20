@@ -118,6 +118,13 @@ Current implementation note as of Step 36:
 - The old fixed Deferred `.spv` runtime path has been removed. G-buffer, classification, queue build, direct light, queued reflection/GI and compose are now declared by the pack and recorded by the hardened Deferred runtime.
 - Deferred pass metadata has an explicit optional `semantic` field. `name` remains the execution-command reference and author-facing debug name; C++ fixed Deferred compute synchronization hooks use `semantic`, not pass names.
 - The built-in `vanilla-deferred-rt` pack declares fixed ABI semantics for `clear_contract`, `gbuffer`, `classify`, `build_lighting_queues`, `direct_light`, `reflection`, `gi` and `compose`, so authors may rename pass `name` values without changing the hardened runtime sync points as long as the semantic tags stay correct.
+- As of Step 38, the built-in `vanilla-deferred-rt` pack uses the public `slots` schema instead of author-written
+  `execution.deferred.commands`. The loader injects `stage: deferred` and fixed `semantic` values for slot passes,
+  validates slot type/schedule compatibility, and generates the internal Deferred command list in canonical backbone
+  order.
+- The first public schema version also supports custom Deferred `passes` inserted through named `insertions` phases.
+  Custom passes are restricted to compute or full-screen `compute_3d`, must be inserted exactly once, and cannot declare
+  fixed backbone semantics. Resource read/write graph validation is not part of Step 38 and remains a follow-up.
 - C++ still owns Vulkan resources, descriptor layouts, TLAS binding, queue buffers, indirect dispatch offsets, barriers, push constants and pass scheduling semantics. The pack owns pass order, shader files, high-level schedules and optional runtime resources.
 - Pack dispatch schedules are high-level: `screen`, `tile_grid`, `direct`, and `lighting_queue`. `lighting_queue` names a queue kind, but C++ resolves the indirect argument buffer and offset.
 - Existing PT and PostRender shaderpacks continue to use the same loader and execution model.
@@ -3139,12 +3146,17 @@ Implementation steps:
   - SBT-style shader/hit fields, completed in Step 29,
   - PT hit groups, completed in Step 29.
 
-Remaining implementation steps after Step 36:
+Remaining implementation steps after Step 38:
 
-- Add Deferred fixed semantic order validation while the runtime still accepts raw `execution.deferred.commands`.
+- Deferred fixed semantic order validation while the runtime still accepts raw `execution.deferred.commands` is complete
+  in Step 37.
+- Public-schema parsing for complete `slots`, custom `passes`, phase `insertions`, custom pass type limits and internal
+  command-list generation is complete in Step 38.
 - Move `ScenePrepare` and `SceneProviderFactory` lifetime to `WorldPipeline` scope so PT and Deferred can share prepared scene runtime without per-module duplication.
-- Replace the public Deferred authoring model with `slots`, `passes`, `insertions` and `resources`, then normalize that schema to the internal runtime command list.
-- Add resource validation for Deferred-stage internal images, public exports, scene draw streams and pack-owned logical resources.
+- Add `resources` logical-resource registry and validation for Deferred-stage internal images, public exports, scene draw
+  streams and pack-owned logical resources.
+- Add phase visibility, read/write dependency validation, generated descriptor binding maps and generated barrier-plan
+  reporting for custom pass `inputs`/`outputs`.
 - Expand preset storage/UI so a preset can configure the selected pipeline and each shaderpack-capable module's pack.
 - Define whether cross-module shaderpack resource references are forbidden by validation or represented through explicit
   public pipeline resources. The current design assumes no implicit cross-module shaderpack runtime resources.
@@ -3163,16 +3175,26 @@ Completion standard:
 
 The first stable Deferred public schema should keep the C++ backbone fixed and expose controlled extension points:
 
-- `slots`: map of fixed semantic slots. Slot key is the fixed semantic (`gbuffer`, `classify`, `direct_light`,
-  `reflection`, `gi`, `compose`, etc.). Pack authors can replace the shader implementation, but cannot create new fixed
-  semantic names.
+- `slots`: map of fixed semantic slots. Slot key is the fixed semantic (`clear_contract`, `gbuffer`, `classify`,
+  `build_lighting_queues`, `direct_light`, `reflection`, `gi`, `compose`). Pack authors can replace the shader
+  implementation, but cannot create new fixed semantic names. Step 38 implements this parser and requires the complete
+  eight-slot backbone in the first version; built-in-slot inheritance/overlay is not implemented yet.
 - `resources`: pack-owned logical images/textures/buffers declared through the existing ShaderPack texture/buffer
   resource model where possible. Authors name resources such as `custom.ssao` and `custom.noise`; C++ owns the actual
-  Vulkan image/buffer allocation, descriptor slots, layouts, barriers, resizing and VR layer handling.
+  Vulkan image/buffer allocation, descriptor slots, layouts, barriers, resizing and VR layer handling. This logical
+  registry and phase-aware resource validation are still Step 39 work; Step 38 only preserves existing
+  `inputs`/`outputs` metadata and existing root `textures`/`buffers`.
 - `passes`: custom extension passes. First stable version should allow compute/full-screen compute only. Custom passes
-  must not declare fixed `semantic`; they are connected through `insertions` plus `inputs`/`outputs`.
+  must not declare fixed `semantic`; they are connected through `insertions` plus `inputs`/`outputs`. Step 38 enforces
+  compute or full-screen `compute_3d` only, rejects `lighting_queue` schedules for custom passes, and requires
+  `local_size.z == 1`.
 - `insertions`: phase lists such as `{ "after_classify": ["custom_ssao"] }`. The list order is the phase-local
-  execution order. Do not expose arbitrary `after: pass_name` dependencies in the first version.
+  execution order. Do not expose arbitrary `after: pass_name` dependencies in the first version. Step 38 implements
+  phase parsing, rejects unknown phases and requires every custom pass to be inserted exactly once.
+
+Step 38 also makes `execution.deferred.commands` and `execution_deferred` invalid in public-schema packs. C++ lowers
+`slots` plus `insertions` into the existing internal `deferredExecution.commands` list, which remains the runtime IR.
+Pack authors should not write that command list for Deferred public packs.
 
 Required authoring features:
 
