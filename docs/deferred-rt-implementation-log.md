@@ -1769,7 +1769,109 @@ Status: in progress
   - `D:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe --test-dir G:\cpp\radiance\MCVR-custom\build-radiance-custom -C Release --output-on-failure` completed successfully: 10/10 tests passed.
 - Remaining work:
   - Step 39 should implement Deferred logical resources and phase visibility validation using the existing
-    texture/buffer runtime path where possible.
+    texture/buffer runtime path where possible. This was completed in Step 39.
+  - Step 40 should implement common/root definitions plus pack/pass/slot `requires` capability validation and
+    ray-query fallback selection errors.
+  - Step 41 should implement explicit resource lifetime policy, including real history resources and reset rules.
+  - Only after these public schema gaps are closed should work resume on the larger shared scene runtime route.
+
+### Step 39: Deferred Logical Resources and Phase Visibility Validation
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.cpp`
+  - `MCVR-custom/tests/shader_pack_deferred_schema_test.cpp`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Step 38 gave Deferred packs stable `slots`, custom `passes`, and phase `insertions`, but custom pass resources were
+    only parsed metadata.
+  - Shaderpack authors need to declare logical data nodes such as `custom.ssao`, `custom.noise`, `gbuffer.depth`,
+    `visibility.primary_mask`, and `lighting.specular`; they should not author Vulkan descriptor sets, bindings, image
+    layouts, barriers, or command buffers.
+  - The implementation should reuse the existing ShaderPack runtime texture/buffer path instead of creating a second
+    Deferred-only resource allocator.
+- Implemented:
+  - Added Deferred public-schema `resources` parsing. Supported first-version groups are:
+    - `resources.images` for writable or sampled runtime images,
+    - `resources.textures` for sampled/imported texture-style resources,
+    - `resources.buffers` for SSBO-style runtime buffers.
+  - Lowered `resources.images` and `resources.textures` into existing `ShaderPackLoader::TextureConfig` entries, and
+    lowered `resources.buffers` into existing `ShaderPackLoader::BufferConfig` entries.
+  - Added authoring aliases needed by the public schema:
+    - image types: `texture2d`, `texture2d_array`, `texture3d`,
+    - buffer type: `ssbo`,
+    - formats such as `rgba8`, `r16f`, `rg16f`, `rgba16f`, and `r32f`,
+    - `size: "render"` for `RENDER_WIDTH` / `RENDER_HEIGHT`,
+    - `layers: "view_count"` for `VIEW_COUNT`,
+    - `usage: ["storage"]`, `["sampled"]`, or both.
+  - Enforced pack-owned logical resource names under `custom.*` when a pack uses the Deferred public schema. Existing
+    root `textures` and `buffers` are still supported, but in a public Deferred pack they are treated as the same logical
+    custom registry and must also use `custom.*`.
+  - Added automatic runtime binding allocation for `resources` wrapper declarations after any explicit legacy
+    `textures`/`buffers` bindings.
+  - Added shader compile definitions for runtime resources:
+    - `RADIANCE_RUNTIME_RESOURCE_SET`,
+    - `RADIANCE_RESOURCE_<SANITIZED_NAME>_SAMPLED_BINDING`,
+    - `RADIANCE_RESOURCE_<SANITIZED_NAME>_STORAGE_BINDING`,
+    - `RADIANCE_RESOURCE_<SANITIZED_NAME>_BUFFER_BINDING`.
+  - Extended `inputs` / `outputs` parsing to support the compact image-name array form:
+    - `"inputs": ["custom.ssao", "gbuffer.depth"]`,
+    - while preserving the explicit object form with `images` and `buffers`.
+  - Added Deferred custom pass graph validation over the generated internal command list:
+    - custom pass outputs must be declared `custom.*` resources,
+    - custom image outputs must be writable,
+    - custom passes cannot write protected namespaces such as `gbuffer.*`, `classification.*`, `queue.*`, `scene.*`,
+      `lighting.*`, or `out.*`,
+    - custom resources cannot be read before an earlier inserted pass writes them, except imported/initial-readable
+      textures,
+    - a custom resource can only be written once in the first version,
+    - unknown namespaces in custom pass inputs fail,
+    - built-in namespace reads are phase-gated against the fixed backbone.
+  - Added phase visibility rules for first-version built-in logical resources:
+    - `scene.*` is always visible,
+    - `gbuffer.*` after `gbuffer`,
+    - `classification.*` and `visibility.*` after `classify`,
+    - `queue.*` after `build_lighting_queues`,
+    - `lighting.direct` after `direct_light`,
+    - `lighting.reflection` / `lighting.specular` after `reflection`,
+    - `lighting.gi` / `lighting.indirect` after `gi`,
+    - `lighting.composed`, `lighting.primary`, and `out.*` after `compose`.
+  - Kept runtime execution on the existing generated `deferredExecution.commands` IR. Pack authors still do not write
+    `execution.deferred.commands`; C++ builds it from `slots` plus `insertions`.
+  - Kept runtime resource transitions on the existing Deferred runtime path. Compute and full-screen compute custom
+    passes already call `DeferredRtModule::addShaderPackPassResourceBarriers()` with their declared `inputs` and
+    `outputs`; this step adds schema validation for that graph rather than exposing barriers to authors.
+  - Added schema tests for:
+    - wrapper resource lowering and valid read/write flow,
+    - protected namespace output rejection,
+    - read-before-write rejection,
+    - too-early built-in resource reads,
+    - undeclared custom outputs,
+    - duplicate custom writes,
+    - non-`custom.*` resource declarations.
+- Deliberately deferred:
+  - Root/common definitions and the explicit `requires` capability model remain Step 40. Attribute `define` and pass
+    `define` / `defines` / `definitions` are still the current shader option path.
+  - Ray-query capability validation with fallback selection remains Step 40. Existing `fallback_compute` is not yet a
+    complete pack/pass/slot requirement system.
+  - Explicit resource lifetimes (`per_frame`, `history`, `persistent`, `imported_texture`) remain Step 41. Existing
+    imported texture, intermediate runtime resource and `shared` behavior is preserved but not yet promoted to the new
+    lifetime enum.
+  - `history` resources are not implemented by this step; temporal resources still need current/previous descriptor
+    naming, resize/reload/world-change resets and tests.
+  - Debug outputs and offline lint / expanded graph reports remain future tooling work. Runtime descriptor binding macros
+    exist, but there is no standalone report yet for expanded pass order, binding map, barrier plan or unused resources.
+  - Custom render passes remain intentionally unsupported in the first public-schema version; first-version custom
+    extension passes are still compute or full-screen `compute_3d`.
+  - Deferred built-in empty-path `getAttributes()` parity with PT remains open.
+- Verification:
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target shader_pack_deferred_schema_test -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `G:\cpp\radiance\MCVR-custom\build-radiance-custom\tests\Release\shader_pack_deferred_schema_test.exe` completed successfully.
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully with `D:\VulkanSDK\1.4.335.0\Bin` prepended to `PATH`.
+  - `ctest --test-dir G:\cpp\radiance\MCVR-custom\build-radiance-custom -C Release --output-on-failure` completed successfully: 10/10 tests passed.
+- Remaining work:
   - Step 40 should implement common/root definitions plus pack/pass/slot `requires` capability validation and
     ray-query fallback selection errors.
   - Step 41 should implement explicit resource lifetime policy, including real history resources and reset rules.

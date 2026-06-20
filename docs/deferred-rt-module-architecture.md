@@ -124,7 +124,14 @@ Current implementation note as of Step 36:
   order.
 - The first public schema version also supports custom Deferred `passes` inserted through named `insertions` phases.
   Custom passes are restricted to compute or full-screen `compute_3d`, must be inserted exactly once, and cannot declare
-  fixed backbone semantics. Resource read/write graph validation is not part of Step 38 and remains a follow-up.
+  fixed backbone semantics.
+- As of Step 39, Deferred public packs can declare pack-owned logical resources through `resources.images`,
+  `resources.textures`, and `resources.buffers`. These lower into the existing ShaderPack runtime image/buffer path, so
+  there is no second Deferred-only Vulkan resource allocator.
+- Custom pass `inputs` and `outputs` now form a validated logical resource graph. Pack-owned resources must use
+  `custom.*`; protected built-in namespaces such as `gbuffer.*`, `visibility.*`, `queue.*`, `lighting.*`, `scene.*`, and
+  `out.*` are read-only and phase-gated for custom passes. C++ validates custom read-before-write, protected writes,
+  undeclared resources, duplicate writes, and too-early built-in reads before runtime setup.
 - C++ still owns Vulkan resources, descriptor layouts, TLAS binding, queue buffers, indirect dispatch offsets, barriers, push constants and pass scheduling semantics. The pack owns pass order, shader files, high-level schedules and optional runtime resources.
 - Pack dispatch schedules are high-level: `screen`, `tile_grid`, `direct`, and `lighting_queue`. `lighting_queue` names a queue kind, but C++ resolves the indirect argument buffer and offset.
 - Existing PT and PostRender shaderpacks continue to use the same loader and execution model.
@@ -3181,13 +3188,16 @@ The first stable Deferred public schema should keep the C++ backbone fixed and e
   eight-slot backbone in the first version; built-in-slot inheritance/overlay is not implemented yet.
 - `resources`: pack-owned logical images/textures/buffers declared through the existing ShaderPack texture/buffer
   resource model where possible. Authors name resources such as `custom.ssao` and `custom.noise`; C++ owns the actual
-  Vulkan image/buffer allocation, descriptor slots, layouts, barriers, resizing and VR layer handling. This logical
-  registry and phase-aware resource validation are still Step 39 work; Step 38 only preserves existing
-  `inputs`/`outputs` metadata and existing root `textures`/`buffers`.
+  Vulkan image/buffer allocation, descriptor slots, layouts, barriers, resizing and VR layer handling. Step 39 implements
+  the first logical registry and phase-aware resource validation by lowering `resources.images`, `resources.textures` and
+  `resources.buffers` to the existing runtime texture/buffer configuration path. Existing root `textures` and `buffers`
+  are preserved; when used in a Deferred public-schema pack, they are also treated as pack-owned logical resources and
+  must use `custom.*`.
 - `passes`: custom extension passes. First stable version should allow compute/full-screen compute only. Custom passes
   must not declare fixed `semantic`; they are connected through `insertions` plus `inputs`/`outputs`. Step 38 enforces
   compute or full-screen `compute_3d` only, rejects `lighting_queue` schedules for custom passes, and requires
-  `local_size.z == 1`.
+  `local_size.z == 1`. Step 39 validates custom pass resource reads/writes against declared logical resources and the
+  phase-visible built-in namespaces.
 - `insertions`: phase lists such as `{ "after_classify": ["custom_ssao"] }`. The list order is the phase-local
   execution order. Do not expose arbitrary `after: pass_name` dependencies in the first version. Step 38 implements
   phase parsing, rejects unknown phases and requires every custom pass to be inserted exactly once.
@@ -3195,6 +3205,61 @@ The first stable Deferred public schema should keep the C++ backbone fixed and e
 Step 38 also makes `execution.deferred.commands` and `execution_deferred` invalid in public-schema packs. C++ lowers
 `slots` plus `insertions` into the existing internal `deferredExecution.commands` list, which remains the runtime IR.
 Pack authors should not write that command list for Deferred public packs.
+
+Step 39 keeps resources as logical data nodes, not Vulkan declarations. A pack author can write:
+
+```json
+"resources": {
+  "images": [
+    {
+      "name": "custom.ssao",
+      "type": "texture2d_array",
+      "format": "r16f",
+      "size": "render",
+      "layers": "view_count",
+      "usage": ["storage", "sampled"]
+    }
+  ],
+  "textures": [
+    {
+      "name": "custom.noise",
+      "type": "texture2d",
+      "format": "rgba8",
+      "width": 256,
+      "height": 256,
+      "source": "textures/noise.png",
+      "usage": ["sampled"]
+    }
+  ],
+  "buffers": [
+    {
+      "name": "custom.tiles",
+      "type": "ssbo",
+      "size": "TILE_COUNT_X * TILE_COUNT_Y * VIEW_COUNT * 16",
+      "usage": ["storage"]
+    }
+  ]
+}
+```
+
+Custom passes then declare logical edges:
+
+```json
+{
+  "name": "custom_ssao",
+  "type": "compute",
+  "compute": "custom_ssao.comp",
+  "schedule": "screen",
+  "inputs": { "images": ["gbuffer.depth", "custom.noise"] },
+  "outputs": { "images": ["custom.ssao"], "buffers": ["custom.tiles"] }
+}
+```
+
+C++ lowers this into runtime resources, descriptor bindings, resource barriers and the generated internal command list.
+Shader compilation receives stable binding macros such as `RADIANCE_RUNTIME_RESOURCE_SET`,
+`RADIANCE_RESOURCE_CUSTOM_SSAO_STORAGE_BINDING`, `RADIANCE_RESOURCE_CUSTOM_SSAO_SAMPLED_BINDING`, and
+`RADIANCE_RESOURCE_CUSTOM_TILES_BUFFER_BINDING`. Pack authors still should not write descriptor set numbers, binding
+numbers, image layouts, buffer offsets or Vulkan barriers in JSON.
 
 Required authoring features:
 
@@ -3223,6 +3288,11 @@ Required authoring features:
   - Add an explicit lifetime policy only for the missing cases that need it: `per_frame`, `history`, `persistent` or
     `imported_texture`.
   - `history` resources are required for temporal effects and must survive across frames with correct resize handling.
+- Resource graph diagnostics:
+  - Step 39 validates the in-loader graph for custom resource declarations, phase visibility, protected namespace writes
+    and read-before-write errors.
+  - A developer-facing expanded report is still missing. It should show the generated pass order, resource reads/writes,
+    descriptor binding map, barrier plan, invalid phase errors and unused resource warnings.
 - Debug outputs:
   - Pack authors must be able to expose logical resources to debug views and offline tools, for example SSAO, wetness,
     masks or intermediate lighting.
