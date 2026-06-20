@@ -2050,3 +2050,84 @@ Status: in progress
   - `G:\cpp\radiance\MCVR-custom\build-radiance-custom\tests\Release\deferred_rt_shaderpack_test.exe` completed successfully.
   - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
   - `ctest --test-dir G:\cpp\radiance\MCVR-custom\build-radiance-custom -C Release --output-on-failure` completed successfully: 10/10 tests passed.
+
+### Step 42: Pipeline-Owned Shared Scene Runtime
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/scene_runtime/shared_scene_runtime.hpp`
+  - `MCVR-custom/src/core/render/scene_runtime/shared_scene_runtime.cpp`
+  - `MCVR-custom/src/core/render/pipeline.hpp`
+  - `MCVR-custom/src/core/render/pipeline.cpp`
+  - `MCVR-custom/src/core/render/modules/world/world_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/ray_tracing/ray_tracing_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/ray_tracing/ray_tracing_module.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/tests/shared_scene_runtime_test.cpp`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Earlier work extracted `ScenePrepare` and added a neutral `SceneProvider`, but `RayTracingModule` and
+    `DeferredRtModule` still each owned their own `ScenePrepare`.
+  - A pipeline containing both PT and Deferred RT would duplicate BLAS/TLAS preparation and scene metadata work.
+  - Future world modules should consume scene facts through a pipeline-level runtime rather than reading chunks,
+    entities, Java payloads, Blaze3D objects, Vulkan layouts or shaderpack concepts directly.
+- Design:
+  - `WorldPipeline` owns one `SharedSceneRuntime` per native pipeline build.
+  - `SharedSceneRuntime` owns the shared `ScenePrepare` and exposes one `SharedSceneFrameContext` per swapchain frame.
+  - `SharedSceneFrameContext` provides:
+    - the shared `ScenePrepareContext`,
+    - a lazily-built `McvrSceneProvider` for neutral draw packets, views, material/render-state metadata and
+      acceleration metadata,
+    - per-frame guards so scene preparation and provider packet enumeration happen at most once for that frame.
+  - `WorldModule` exposes scene-runtime requirement flags. First-version requirements are:
+    - `Acceleration`: module needs TLAS/BLAS scene metadata,
+    - `Provider`: module needs neutral draw/view/material packets.
+  - `RayTracingModule` requests `Acceleration` only. It consumes the shared `ScenePrepareContext`, then performs PT-only
+    SBT/hit-group setup in its own module path.
+  - `DeferredRtModule` requests `Acceleration | Provider`. It consumes the shared provider and never owns scene
+    preparation directly.
+  - `WorldPipelineContext::render()` calls the shared runtime before executing world module contexts, using the aggregate
+    requirement flags from the active modules.
+- Implementation notes:
+  - Added `SceneRuntimeRequirement` flags to `WorldModule`:
+    - `Acceleration`: shared `ScenePrepareContext` / TLAS / BLAS scene metadata,
+    - `Provider`: neutral draw/view/material packet stream.
+  - Added `SharedSceneRuntime` and `SharedSceneFrameContext` under `MCVR-custom/src/core/render/scene_runtime/`.
+  - Added `SharedSceneFrameGuard` with a pipeline frame serial. The guard intentionally does not use swapchain
+    `frameIndex` as its per-frame token because the same swapchain image is reused across later rendered frames.
+  - `WorldPipeline` now:
+    - creates modules and applies module attributes,
+    - aggregates scene runtime requirements,
+    - creates `WorldPipelineContext` objects before module context construction,
+    - builds `SharedSceneRuntime` only if some active module requests scene runtime data,
+    - builds modules and then binds their contexts back into `WorldPipelineContext`,
+    - calls `SharedSceneRuntime::beginFrame(frameIndex, eyeCount, requirements)` before module rendering.
+  - `RayTracingModule` no longer owns `ScenePrepare`. It requests `Acceleration`, obtains the shared
+    `ScenePrepareContext`, and keeps PT-only SBT/hit-group setup local.
+  - `DeferredRtModule` no longer owns `ScenePrepare` or constructs its own `McvrSceneProvider`. It requests
+    `Acceleration | Provider`, refreshes the shared provider each render frame after pipeline begin-frame, and consumes
+    the provider's draw streams, view data and AS metadata.
+  - Added `shared_scene_runtime_test` to cover requirement flag behavior and frame-serial guard semantics.
+- JNI/game bridge policy:
+  - This step does not add new JNI payloads. Current Java bridge data is already sufficient for the milestone:
+    chunk/entity geometry, texture ids, group/content names, vertex/index counts, raster metadata, world/sky uniforms
+    and texture mapping.
+  - Future JNI extensions should add missing scene facts to the Java proxy/native world storage boundary, then flow
+    through `SharedSceneRuntime`. Modules should not call Java or depend on JNI record layouts.
+  - Blaze3D remains a future scene-source adapter. It should feed the shared runtime rather than Deferred RT directly.
+- Completion standard:
+  - PT-only pipelines still build and render with the same shaderpack behavior.
+  - Deferred-only pipelines still build and render with the same G-buffer/ray-query shaderpack path.
+  - A diagnostic pipeline containing both PT and Deferred RT shares one `ScenePrepare` and one per-frame
+    `ScenePrepareContext`.
+  - `ScenePrepareContext::render()` is submitted at most once per frame before modules consume TLAS/scene metadata.
+  - Provider packet enumeration is skipped for PT-only pipelines and runs at most once for Deferred RT frames.
+  - Native tests cover requirement flag aggregation and per-frame guard behavior without requiring Minecraft runtime
+    state.
+- Verification:
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target shared_scene_runtime_test core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir G:\cpp\radiance\MCVR-custom\build-radiance-custom -C Release --output-on-failure` completed successfully: 11/11 tests passed.
+  - `G:\cpp\radiance\Radiance-custom\gradlew.bat classes` completed successfully. Gradle reported existing `sun.misc.Unsafe` warnings only.

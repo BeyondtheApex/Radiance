@@ -64,14 +64,17 @@ Radiance Java pipeline
 MCVR Pipeline::collectWorldModules()
        |
        v
-DeferredRtModule : WorldModule
+WorldPipeline
        |
-       +-- SceneProvider
-       |     +-- McvrSceneProvider       current chunk/entity data
-       |     +-- Blaze3DSceneProvider    future adapter
+       +-- SharedSceneRuntime
+       |     +-- ScenePrepare
+       |     |     builds/updates BLAS/TLAS and GPU scene metadata
+       |     |
+       |     +-- SceneProvider
+       |           +-- McvrSceneProvider       current chunk/entity/native world data
+       |           +-- Blaze3DSceneProvider    future adapter
        |
-       +-- ScenePrepare
-       |     builds/updates BLAS/TLAS and GPU scene metadata
+       +-- DeferredRtModule : WorldModule
        |
        +-- DeferredShaderPackRuntime
        |     loads deferred shaderpack stage, resources, passes, execution
@@ -894,20 +897,23 @@ The runtime owner should be the `WorldPipeline` or a pipeline-level scene runtim
 WorldPipeline
   SharedSceneRuntime
     ScenePrepare
-    SceneProviderFactory
-    shared texture/material tables
+    optional McvrSceneProvider
 
 RayTracingModule
-  uses SharedSceneRuntime.ScenePrepare
+  requests Acceleration
+  uses SharedSceneRuntime.ScenePrepareContext
+  keeps PT-only SBT/hit-group setup in the PT module
 
 DeferredRtModule
-  uses SharedSceneRuntime.ScenePrepare
-  uses SharedSceneRuntime.SceneProviderFactory
+  requests Acceleration | Provider
+  uses SharedSceneRuntime.ScenePrepareContext
+  uses SharedSceneRuntime.SceneProvider packets/views/AS metadata
 ```
 
 This avoids duplicating the most fragile scene synchronization code and avoids duplicated BLAS/TLAS submission when a pipeline contains both PT and Deferred RT for debugging, transition, or A/B comparison.
 
-Implementation note: the current extraction already moved PT-owned preparation into `ScenePrepare`, but the current module implementations still create their own `ScenePrepare` instances. That is acceptable for the first Deferred RT bring-up, but it is not the final architecture for dynamic path switching.
+Implementation note: Step 42 moves `ScenePrepare` ownership to `WorldPipeline` scope through `SharedSceneRuntime`.
+`RayTracingModule` and `DeferredRtModule` no longer create their own `ScenePrepare` instances.
 
 ---
 
@@ -2680,6 +2686,54 @@ Completion standard:
 
 Goal: share acceleration structure and scene metadata preparation between PT and Deferred RT without making Deferred RT depend on `RayTracingModule`.
 
+Current implementation target:
+
+```text
+Java / JNI current MCVR world upload
+  chunks, entities, textures, uniforms, raster metadata
+        |
+        v
+Renderer::world() native scene storage
+        |
+        v
+WorldPipeline-owned SharedSceneRuntime
+  - shared ScenePrepare and per-frame ScenePrepareContext
+  - optional McvrSceneProvider packet/view/material cache
+        |
+        +-- RayTracingModule: TLAS/AS metadata plus PT-only SBT setup
+        |
+        +-- DeferredRtModule: SceneProvider draw streams, views and TLAS/AS metadata
+```
+
+`SharedSceneRuntime` is a world-pipeline infrastructure layer. It is not a Deferred RT submodule and it is not a PT
+submodule. Future world modules that need scene facts should request them from this runtime rather than reading Java,
+chunks, entities, Blaze3D objects, Vulkan layouts or shaderpack metadata directly.
+
+The Java/JNI bridge remains the game-source boundary. The shared runtime consumes native world storage that Java has
+already populated through existing proxy calls. It does not call Java and does not expose JNI record layouts to modules.
+First-version shared runtime work must not require new JNI payloads; current geometry, texture, raster metadata,
+world/sky uniform and texture-mapping data is sufficient for the PT + Deferred RT sharing milestone. Future Java/JNI
+extensions should add missing scene facts to this boundary, then flow through `SharedSceneRuntime`.
+
+Current implementation status:
+
+- `WorldModule::sceneRuntimeRequirements()` advertises whether a module needs `Acceleration`, `Provider`, or neither.
+- `WorldPipeline` aggregates requirements after module attributes are applied, builds `SharedSceneRuntime` only when at
+  least one active module asks for scene runtime data, and calls `beginFrame()` before module contexts render.
+- `SharedSceneRuntime` owns the shared `ScenePrepare`, one `ScenePrepareContext` per swapchain frame, and a lazy
+  `McvrSceneProvider` per frame context.
+- `SharedSceneFrameGuard` uses a monotonically increasing pipeline frame serial, not swapchain `frameIndex`, so reused
+  swapchain images still record scene preparation once per rendered frame.
+- `RayTracingModule` requests `Acceleration` only. It reuses the shared `ScenePrepareContext` and does not force provider
+  draw-packet enumeration.
+- `DeferredRtModule` requests `Acceleration | Provider`. It reads the same prepared AS metadata and the lazy provider
+  packet/view/material streams after the pipeline has begun the shared runtime frame.
+
+Java-side use remains unchanged for this milestone: game objects become renderable data when the current mod upload path
+copies chunk/entity geometry, material/texture ids, raster metadata and uniforms into native world storage. When future
+work needs data that the native runtime cannot infer, the Java mod and JNI ABI must add compact neutral fields at that
+upload boundary first; modules then consume the normalized result from `SharedSceneRuntime`, not direct Java objects.
+
 #### 2.1 Extract shared scene preparation
 
 Implementation steps:
@@ -2687,7 +2741,7 @@ Implementation steps:
 - Move reusable logic from the current PT world preparation code into:
 
 ```text
-MCVR-custom/src/core/render/modules/world/common/scene_prepare/
+MCVR-custom/src/core/render/scene_prepare/
 ```
 
 - Rename generic types to:
@@ -2698,7 +2752,7 @@ MCVR-custom/src/core/render/modules/world/common/scene_prepare/
   - `SceneTextureResources`.
 - Keep PT-specific naming in an adapter layer only if some PT shaders still require it.
 - Update `RayTracingModule` to consume the shared component.
-- Add `DeferredRtModule` ownership of the same shared component.
+- Add `DeferredRtModule` consumption of the same shared component.
 
 Completion standard:
 
@@ -2722,7 +2776,14 @@ MCVR-custom/src/core/render/scene_runtime/
 - Move `ScenePrepare` ownership from individual modules into the shared runtime.
 - Expose per-frame `ScenePrepareContext` references through the runtime.
 - Let `RayTracingModule` and `DeferredRtModule` borrow the same prepared context instead of creating their own `ScenePrepare`.
-- Ensure `ScenePrepareContext::render()` is recorded once per frame before the first module that needs AS/scene metadata.
+- Add module-level scene runtime requirement flags:
+  - `Acceleration` for TLAS/BLAS/scene metadata,
+  - `Provider` for neutral draw packets, views and material/render-state metadata.
+- Aggregate requirements in `WorldPipeline`, then call `SharedSceneRuntime::beginFrame(frameIndex, eyeCount, requirements)`
+  before executing world module contexts.
+- Ensure `ScenePrepareContext::render()` is recorded once per frame before modules that need AS/scene metadata consume it.
+- Build provider packets lazily only when `Provider` is requested. PT-only pipelines should not enumerate Deferred draw
+  packets.
 - Keep PT-only SBT hit-group setup as a PT adapter step after the shared preparation pass.
 - Add assertions or debug counters that detect multiple AS preparation submissions in one frame.
 
@@ -2731,6 +2792,7 @@ Completion standard:
 - A pipeline containing only PT behaves the same as before.
 - A pipeline containing only Deferred RT builds one TLAS per frame.
 - A diagnostic pipeline containing both PT and Deferred RT still builds one shared TLAS per frame and both modules consume the same AS metadata.
+- Provider packet enumeration runs at most once per frame and only when an active module requests it.
 - Dynamic Java pipeline rebuild/switch keeps old runtime resources alive only through the existing frame-resource-retainer path and does not double-own scene history.
 
 #### 2.2 Preserve PT shaderpack behavior
@@ -3173,7 +3235,7 @@ Remaining implementation steps after Step 41:
 - Explicit resource lifetime policy is complete in Step 41 for `per_frame`, `history`, `persistent` and
   `imported_texture`. Runtime resize and shaderpack reload reset history through resource rebuild/pre-close paths.
   Explicit camera-cut, dimension/world-change and major render-scale reset signals still need engine hooks.
-- Move `ScenePrepare` and `SceneProviderFactory` lifetime to `WorldPipeline` scope so PT and Deferred can share prepared scene runtime without per-module duplication.
+- `ScenePrepare` lifetime is now `WorldPipeline` scoped through `SharedSceneRuntime`, and provider packet enumeration is lazy behind the `Provider` requirement flag.
 - Expand preset storage/UI so a preset can configure the selected pipeline and each shaderpack-capable module's pack.
 - Define whether cross-module shaderpack resource references are forbidden by validation or represented through explicit
   public pipeline resources. The current design assumes no implicit cross-module shaderpack runtime resources.
