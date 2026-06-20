@@ -1460,3 +1460,81 @@ Status: in progress
   - Deferred shaderpack pass resource lists currently manage runtime textures/buffers and public output images. Scene set 8 exposes fixed scene/G-buffer/queue resources directly to shaders; stronger metadata validation and named resource linting should be added with the built-in pack.
   - G-buffer still lacks earliest-stage OpenXR hidden-area stencil/scissor clipping.
   - Transparent/refraction queue consumption remains deferred to the dedicated transparent/refraction path.
+
+### Step 35: Built-in `vanilla-deferred-rt` Shaderpack Migration
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/CMakeLists.txt`
+  - `MCVR-custom/src/shader/CMakeLists.txt`
+  - `MCVR-custom/src/shader/world/deferred_rt/internal/vanilla-deferred-rt/configs.json`
+  - `MCVR-custom/src/shader/world/deferred_rt/internal/vanilla-deferred-rt/world/deferred_rt/*`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_shaderpack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_shaderpack.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/core/render/pipeline.cpp`
+  - `MCVR-custom/tests/deferred_rt_shaderpack_test.cpp`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Keeping the fixed Deferred shader sources as installed `.spv` files would make every later shaderpack feature harder to migrate and would continue expanding the old C++-owned pass path.
+  - Deferred RT should match the PT module's pack-owned shader model: pack controls pass list, shader files and execution order; C++ owns hardened Vulkan resources, descriptors, barriers, TLAS binding, queue buffers and indirect dispatch offsets.
+- Implemented:
+  - Moved all Deferred RT GLSL sources from `src/shader/world/deferred_rt/` into `src/shader/world/deferred_rt/internal/vanilla-deferred-rt/world/deferred_rt/`.
+  - Added `vanilla-deferred-rt/configs.json` with the full built-in pass sequence:
+    - `clear_contract`,
+    - `gbuffer` render pass with `content: minecraft_gbuffer`,
+    - `classify`,
+    - `build_lighting_queues`,
+    - `direct_light`,
+    - queued `reflection`,
+    - queued `gi`,
+    - `compose`.
+  - Added high-level dispatch schedules:
+    - `screen` for full-screen compute/ray-query passes,
+    - `tile_grid` for the queue builder,
+    - `lighting_queue` for reflection and GI indirect dispatch.
+  - Added shaderpack schema/runtime support for:
+    - `fallback_compute` on compute/ray-query passes,
+    - `schedule`,
+    - `local_size`,
+    - lighting queue enums,
+    - render shader variants such as `native_stereo` and `multiview` without requiring a verbose `backends` block.
+  - Added `ShaderPack::builtInDeferredRtShaderPackPath()` and made Deferred RT's empty shaderpack path load `shaders/world/deferred_rt/vanilla-deferred-rt.zip`.
+  - Changed shaderpack zip extraction staging from the PT-specific `temp/shaders/world/ray_tracing` directory to the shared `temp/shader_packs` directory.
+  - Changed shared shaderpack config creation so Deferred RT always builds a module-owned deferred pack runtime, even when the configured path is empty.
+  - Removed the old fixed Deferred compute/G-buffer pipeline members and the old fixed pass recording functions.
+  - Added Deferred shaderpack render-pass runtime support for `minecraft_gbuffer`; C++ selects native-stereo or multiview render backend, creates the graphics pipelines, records draw streams and consumes pack-owned vertex/fragment shaders.
+  - Changed compute/ray-query runtime dispatch:
+    - `screen` schedule is calculated by C++ from image size, layer count and pass `local_size`,
+    - `direct` schedule uses validated expression dimensions,
+    - `tile_grid` dispatches the lighting queue tile grid,
+    - `lighting_queue` uses `vkCmdDispatchIndirect` with C++-owned queue offsets.
+  - Kept pixel-level shader early-outs as defensive checks only; reflection/GI now use queue dispatch as the main scheduling path.
+  - Made `depth_compare` and `color_blend` fields affect the Deferred G-buffer graphics pipeline.
+  - Excluded `world/deferred_rt/internal` from ordinary shader `.spv` installation.
+  - Added install-time creation of `shaders/world/deferred_rt/vanilla-deferred-rt.zip`, staged with `common/` and `util/`.
+  - Added install-time removal of stale old Deferred `.spv` artifacts from both Radiance resources and MCVR bin resources.
+  - Updated `deferred_rt_shaderpack_test` so render pass execution is accepted for `minecraft_gbuffer`, unsupported render content is rejected, ray-query fallback is accepted without device ray-query support, and lighting-queue schedules are counted/validated.
+- Synchronization and ownership notes:
+  - Pack authors do not choose Vulkan descriptor set numbers, queue buffer offsets, indirect argument offsets, TLAS binding or barriers.
+  - Pack authors declare pass order, shader files and high-level schedules. `lighting_queue` takes a semantic queue kind (`direct`, `reflection`, `gi`, `refraction`), not an arbitrary indirect offset.
+  - Scene set 8 remains a C++ ABI between the hardened runtime and the Deferred shaders. It is not a public JSON resource namespace yet.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully with `D:\VulkanSDK\1.4.335.0\Bin` prepended to `PATH`.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 9/9 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - Manual pack shader compile check with `glslangValidator.exe -V --target-env vulkan1.4 -I<vanilla-deferred-rt-root>` completed successfully for all Deferred pack `.comp`, `.vert` and `.frag` files.
+  - Installed `Radiance-custom/src/main/resources/shaders/world/deferred_rt/vanilla-deferred-rt.zip`.
+  - Verified `Radiance-custom/src/main/resources/shaders/world/deferred_rt` contains the zip and no old fixed Deferred `.spv` files after install.
+- Remaining work:
+  - Move `ScenePrepare` and `SceneProviderFactory` lifetime to `WorldPipeline` scope so PT and Deferred share scene runtime cleanly.
+  - Add a dedicated shaderpack lint/offline parser executable; current verification is build plus tests plus manual pack shader compilation.
+  - Add in-game, VR and preset switching tests before considering the framework frozen.
+  - G-buffer still needs earliest-stage OpenXR hidden-area clipping through mask/stencil/scissor policy. Current visibility mask still removes hidden pixels at classification/queue scheduling.
+  - Direct light remains full-screen `screen` dispatch in `vanilla-deferred-rt`; the direct queue is built for diagnostics and future migration.
+  - Transparent/refraction queue consumption remains deferred to the dedicated transparent/refraction path.
+  - Stronger named resource validation for Deferred scene/G-buffer/queue resources should be added with the diagnostics/offline report chain.
