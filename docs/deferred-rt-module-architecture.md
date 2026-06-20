@@ -98,7 +98,7 @@ The module is independent from the existing `RayTracingModule`, but it should re
 - post-render integration,
 - NRD/upscaler/temporal-compatible output buffers where possible.
 
-Current implementation note as of Step 30:
+Current implementation note as of Step 34:
 
 - `ShaderPackLoader` has a third metadata stage, `stage: deferred`.
 - The loader accepts both `execution_deferred` and nested `execution.deferred`.
@@ -107,8 +107,13 @@ Current implementation note as of Step 30:
 - PT keeps the historical default: an empty path means built-in `vanilla-pt.zip` and external pack failures may fall back to it.
 - Deferred RT has its own `render_pipeline.module.deferred_rt.attribute.shader_pack_path`; an empty path means no shaderpack and no PT fallback.
 - `WorldPipeline` can load a shared `ShaderPack` for Deferred RT when that Deferred path is explicit.
-- `DeferredRtModule` inspects the shared pack's Deferred stage, validates that Deferred execution pass commands reference known Deferred-stage passes, and exposes the summary in diagnostics text.
-- Deferred-stage passes can be represented in the shared pass list, but `DeferredRtModule` does not yet record or execute them.
+- `DeferredRtModule` inspects the selected pack's Deferred stage, validates that Deferred execution pass commands reference known Deferred-stage passes, and exposes inspection plus runtime-plan summaries in diagnostics text.
+- `DeferredRtModule` now records Deferred-stage runtime execution for:
+  - `compute`,
+  - `ray_query` when `VK_KHR_ray_query` is available,
+  - `full_screen` with `backend: compute_3d`.
+- The Deferred shaderpack runtime binds a module-owned scene descriptor set with world/sky uniforms, G-buffer draw/view buffers, classification/visibility masks, lighting queue buffers, texture mapping and TLAS. User-declared runtime textures/buffers and execution variables use the existing `ShaderPack` descriptor model.
+- Fixed native G-buffer, classification, direct-light, reflection/GI queue dispatch and compose still run from native code. Moving those fixed passes into a built-in `vanilla-deferred-rt` pack is the next stage, not part of the current runtime bring-up.
 - Existing PT and PostRender shaderpacks continue to use the same loader and execution model.
 
 ---
@@ -3049,17 +3054,21 @@ Goal: make the fixed pipeline user-customizable without exposing PT concepts or 
 
 #### 6.1 Extend shaderpack metadata
 
-Implementation status as of Step 31: partially complete. The shared loader now understands `stage: deferred`,
-`execution_deferred` and nested `execution.deferred`, and rejects Deferred-stage passes that try to use PT/SBT
-fields such as `rgen`, `hit_groups`, `rchit`, `rahit` or `query_sharc`. The loader also accepts `ray_query`
-as a Deferred-only pass kind for metadata and validation. Java and native selection now support Deferred RT as
-a shaderpack owner through `render_pipeline.module.deferred_rt.attribute.shader_pack_path`.
-`DeferredRtModule` inspects its selected pack's Deferred stage and rejects execution commands that reference
-unknown Deferred passes. Native shaderpack runtimes are stored by owning module so PT and Deferred RT can use
-different packs in the same graph.
+Implementation status as of Step 34: complete enough for Deferred compute runtime bring-up. The shared loader
+understands `stage: deferred`, `execution_deferred` and nested `execution.deferred`, and rejects Deferred-stage
+passes that try to use PT/SBT fields such as `rgen`, `hit_groups`, `rchit`, `rahit` or `query_sharc`. The loader
+also accepts `ray_query` as a Deferred-only pass kind. Java and native selection support Deferred RT as a shaderpack
+owner through `render_pipeline.module.deferred_rt.attribute.shader_pack_path`. Native shaderpack runtimes are stored
+by owning module so PT, Deferred RT and PostRender can use different packs in the same graph.
 
-This is still a metadata, selection and validation shell only: Deferred RT still needs a runtime that consumes
-Deferred-stage passes and binds scene draw streams, G-buffer images and ray-query resources.
+`DeferredRtModule` now builds a Deferred runtime plan and can execute Deferred `compute`, supported `ray_query`,
+and `full_screen` `compute_3d` passes through the stage execution command list. Unsupported render/graphics
+full-screen passes may exist in metadata, but a Deferred execution command that references them fails during module
+build with a clear runtime-plan error.
+
+The remaining gap is shaderpack migration, not basic runtime dispatch: the current fixed native G-buffer,
+classification, direct lighting, queued reflection/GI and compose path has not yet been represented as a built-in
+Deferred shaderpack.
 
 Shaderpack selection is module-scoped:
 
@@ -3116,14 +3125,16 @@ Remaining implementation steps after Step 32:
 - Define whether cross-module shaderpack resource references are forbidden by validation or represented through explicit
   public pipeline resources. The current design assumes no implicit cross-module shaderpack runtime resources.
 - Add a shaderpack lint/offline parser tool that can validate a Deferred pack without launching Minecraft.
-- Add a minimal built-in `vanilla-deferred-rt` pack after the fixed G-buffer path has real runtime passes to move.
+- Add a minimal built-in `vanilla-deferred-rt` pack that mirrors the fixed native path and then progressively moves
+  fixed pass ordering into Deferred shaderpack metadata.
 
 Completion standard:
 
 - A deferred pack can declare G-buffer, lighting and compose passes.
 - A pack using PT-only declarations fails before rendering with a clear error. The PT-only part is covered by Step 29,
   unknown Deferred execution pass references are covered by Step 30, and module/stage compatibility is covered by
-  Step 31. Full resource/pass validation remains future work.
+  Step 31. Runtime-plan validation for `compute`, `ray_query` and `full_screen compute_3d` is covered by Step 34.
+  Full render-pass and shaderpack-G-buffer migration remains future work.
 
 #### 6.2 Add view/layer execution declarations
 

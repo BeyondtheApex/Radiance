@@ -1402,3 +1402,61 @@ Status: in progress
   - Refraction/transparent queue consumption is not implemented until the dedicated transparent/refraction path.
   - First queue records store tile coordinates plus flags only. Packed active pixel bounds can be added later if diagnostics show sparse-tile waste.
   - Foveated secondary-work density is not implemented yet. It should map onto queue emission, resolution tier or sample-count policy without reducing primary G-buffer fidelity inside the OpenXR visible area.
+
+### Step 34: Deferred Shaderpack Runtime Execution
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_shaderpack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_shaderpack.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/core/middleware/com_radiance_client_pipeline_Pipeline.cpp`
+  - `MCVR-custom/tests/deferred_rt_shaderpack_test.cpp`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Steps 30-32 made Deferred RT a shaderpack owner and Step 33 made the expensive native lighting path queue-shaped, but Deferred-stage shaderpack passes still could not execute.
+  - The next `vanilla-deferred-rt` migration needs a real runtime for compute/ray-query/full-screen compute passes before fixed native passes can be mirrored in pack metadata.
+  - This step intentionally does not move fixed native G-buffer/classification/lighting/compose into shaderpack yet. It creates the execution substrate those passes will use in the next step.
+- Implemented:
+  - Added `DeferredRtShaderPackRuntimePlan` with validation and diagnostics.
+  - Runtime-supported Deferred pass kinds are:
+    - `compute`,
+    - `ray_query` when the device reports ray-query support,
+    - `full_screen` with `backend: compute_3d`, including `backend: auto` selecting a compute backend.
+  - Render passes and graphics full-screen passes remain metadata-pending. They are allowed to exist, but the module rejects a Deferred execution command that tries to run them.
+  - Added Deferred shaderpack scene descriptor set 8:
+    - world, last-world and sky uniform buffers,
+    - G-buffer view and draw buffers,
+    - classification and visibility mask storage images,
+    - lighting queue record/header buffers,
+    - texture mapping buffer,
+    - TLAS.
+  - Added runtime-resource descriptor set and execution-variable descriptor set after the fixed Deferred sets using the existing `ShaderPack` set-index convention.
+  - Added runtime resource initialization, buffer refresh and descriptor binding for Deferred-owned shaderpacks.
+  - Added compute pipeline construction for Deferred `compute`, `ray_query` and full-screen `compute_3d` passes.
+  - Added Deferred execution command recording after native compose and before final output barriers.
+  - Added per-pass execution-variable upload, expression-based compute dispatch dimensions, full-screen compute dispatch by target dimensions and layer count, and TLAS readiness checks for ray-query passes.
+  - Added resource barriers for runtime textures/buffers and Deferred public outputs used by shaderpack pass resource lists. Sampled-only/imported runtime textures use shader-read layouts; imported textures cannot be pass outputs.
+  - Extended diagnostics overlay output with the Deferred shaderpack runtime plan summary.
+  - Extended `deferred_rt_shaderpack_test` for:
+    - compute plus supported ray query,
+    - executed ray query without device support,
+    - pending render pass not executed,
+    - executed render pass rejection,
+    - full-screen compute and auto-selected compute backend.
+- Synchronization notes:
+  - Deferred shaderpack runtime runs after the fixed native compose pass in this step, so user passes can post-process or augment current Deferred public outputs/runtime resources.
+  - Runtime pass barriers cover declared pass `inputs` and `outputs`. Fixed scene/G-buffer/queue resources bound through scene set 8 are synchronized by the native Deferred frame barriers that prepare classification, queues and compose.
+  - Ray-query runtime passes insert a TLAS read barrier when ray-query support and a frame TLAS are available; passes skip execution if the frame has no TLAS.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully with `D:\VulkanSDK\1.4.335.0\Bin` prepended to `PATH`.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 9/9 tests passed.
+- Remaining work:
+  - `vanilla-deferred-rt` pack migration is next: mirror the fixed native Deferred path in pack metadata, then decide pass-by-pass when native fixed ordering is removed or kept as fallback.
+  - Fixed native G-buffer/classification/direct-light/reflection/GI/compose still run outside shaderpack execution. The Step 34 runtime currently executes after native compose.
+  - Render/graphics full-screen Deferred shaderpack passes are still pending. First migration should prefer compute/ray-query/full-screen compute until the raster pass backend is ready.
+  - Deferred shaderpack pass resource lists currently manage runtime textures/buffers and public output images. Scene set 8 exposes fixed scene/G-buffer/queue resources directly to shaders; stronger metadata validation and named resource linting should be added with the built-in pack.
+  - G-buffer still lacks earliest-stage OpenXR hidden-area stencil/scissor clipping.
+  - Transparent/refraction queue consumption remains deferred to the dedicated transparent/refraction path.
