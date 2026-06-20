@@ -344,8 +344,8 @@ Rasterized Deferred RT needs internal resources that are not part of the Java pu
 | `gbuffer:primary_depth` | `R16_SFLOAT` or alias | First primary surface depth. | Yes, through `first_hit_depth`. |
 | `gbuffer:material_id` | `R32_UINT` | Shader/material classification, debugging, material-table lookup. | No initially. |
 | `gbuffer:object_id` | `R32_UINT` | Motion validation, disocclusion, selection/debug, per-object history. | No initially. |
-| `visibility:primary_mask` | `R8_UINT` or bitset | Marks valid primary-surface pixels. | No. |
-| `classification:lighting_tiles` | buffer or `R32_UINT` image | Tile/pixel lists for direct, GI, reflection and transparent work. | No. |
+| `visibility:primary_mask` | `R8_UINT` or bitset | Marks valid primary-surface pixels after depth/G-buffer and OpenXR visibility-mask clipping. | No. |
+| `classification:lighting_queues` | buffers | Per-view compacted tile/pixel queues plus indirect dispatch arguments for direct, GI, reflection and transparent/refraction work. | No. |
 | `history:*` | varies | Temporal accumulation, reprojection and denoiser helper state. | No unless a downstream module explicitly consumes it. |
 | `reactive_mask` / `transparency_mask` | `R8_UNORM` or `R16_SFLOAT` | Future upscaler quality signals for transparency/particles. | Not in first contract; add later only if FSR/XeSS/DLSS integration requires it. |
 | `exposure` / luminance buffers | buffer or small image | Auto exposure and tone mapping analysis. | No; ToneMapping owns its own exposure path today. |
@@ -927,6 +927,7 @@ OpenXR visibility masks are different from foveated quality reduction. Pixels ou
 - G-buffer values outside the mask should be cleared to explicit invalid defaults,
 - lighting, denoising and temporal passes must treat those pixels as invalid and avoid sampling them as neighbors,
 - the mask is per view/layer and must not be shared blindly between eyes.
+- The OpenXR bridge may expose the hidden-area mesh as per-eye vertices/indices from `XR_KHR_visibility_mask`. Deferred RT should consume that data by rasterizing a per-eye hidden/valid mask or stencil before G-buffer/classification. This belongs in Deferred RT and shared VR support, not in the PT module.
 
 ### 7.2 Raster Passes
 
@@ -1111,37 +1112,43 @@ The first usable version should implement:
 
 Workload will be uneven. That is expected. The architecture should manage it explicitly.
 
-Phase 1 scheduling:
+Bring-up scheduling already implemented:
 
 - Full-screen layered dispatch for each ray-query pass.
-- Fast early-out in the shader.
+- Pixel-level early-out from the classification mask.
 - Simple masks in G-buffer/material flags.
 - Stable deterministic random sequence per pixel/view/frame.
 - No `vkCmdDispatchIndirect` dependency.
 
-Phase 2 scheduling:
+This is acceptable only for first correctness bring-up. Do not add a new "tile early-out but still full dispatch" milestone as the main optimization path. Once work is classified per tile, the next useful step is to compact active work and dispatch only those queued entries. Pixel-level checks should remain as defensive validation for stale queue entries, bounds and debugging, not as the scheduling mechanism.
+
+Production scheduling phase 1:
 
 - Tile classification, for example 8x8 or 16x16.
-- Per-tile flags:
+- Per-view/per-layer queue builders classify and compact active tile records for:
   - has shadow receivers,
   - has reflective pixels,
   - has GI candidates,
   - has transparent/refraction candidates.
-- Skip whole tiles when possible.
+- Build one queue and indirect dispatch argument buffer per expensive path, at minimum:
+  - `direct_light_tiles`,
+  - `reflection_tiles`,
+  - `gi_tiles`,
+  - `refraction_tiles`.
+- Pass shaders run over queued tile records and then iterate pixels inside that tile.
 - Keep the primary G-buffer full resolution; tile classification controls secondary work only.
 
-Phase 3 scheduling:
+Production scheduling phase 2:
 
-- Compact active tiles or pixels into lists.
-- Build indirect dispatch arguments for reflection/GI/expensive lighting passes.
-- Use indirect dispatch where the backend supports it.
+- Optionally refine from tile queues to pixel queues for very sparse work such as glossy reflections, emissive probes or refraction.
+- Use indirect dispatch where the backend supports it; where it does not, use an explicit queued-count fallback path rather than returning to full-screen work as the normal route.
 - Allow separate resolution scales:
   - shadows full resolution,
   - reflections half resolution or checkerboard,
   - GI half/quarter resolution plus temporal accumulation.
 - Maintain per-view/tier lists so VR eyes, visibility masks and foveated rings can have different active work without changing the public output image contract.
 
-Do not make the first version depend on compaction or indirect dispatch. Start with correctness and layer handling, then optimize.
+OpenXR visibility masks feed this scheduler before queue construction. Masked-out pixels must not generate queue entries. Foveation should also be represented as queue density, resolution tier or sample-count policy for secondary work, not as reduced primary G-buffer fidelity.
 
 ### 8.7 Transparent Rendering Path
 
@@ -1843,7 +1850,7 @@ VR is not an optional post-feature for this module. The module should be designe
   - `ipd`
   - foveated parameters
 
-The current custom branch also shows the limit of the existing PT-style path: stereo/layered dispatch exists, but practical work submission is still fixed-size `vkCmdTraceRaysKHR` or `vkCmdDispatch` over the selected dimensions. It does not provide a general tail-compaction, tile-list or indirect-dispatch facility. Deferred RT should preserve the good layer contract from `MCVR-custom`, while moving expensive secondary work into compute-shaped passes that can later be driven by tile lists and indirect dispatch.
+The current custom branch also shows the limit of the existing PT-style path: stereo/layered dispatch exists, but practical work submission is still fixed-size `vkCmdTraceRaysKHR` or `vkCmdDispatch` over the selected dimensions. It does not provide a general tail-compaction, tile-list or indirect-dispatch facility. Deferred RT should preserve the good layer contract from `MCVR-custom`, while moving expensive secondary work into compute-shaped passes driven by per-view tile queues and indirect dispatch.
 
 The deferred module should follow the same conventions, but it should hide them behind a `SceneViewData` / `ViewContext` abstraction so future backends are not tied to the exact current `WorldUBO` layout.
 
@@ -1963,7 +1970,7 @@ Variable-rate VR policy:
 - Visibility-mask clipping may affect G-buffer rasterization because masked pixels are outside the displayed area.
 - Foveation should not reduce the primary G-buffer inside the visible area in early versions.
 - Foveation should reduce secondary work first: reflection rays, GI rays, expensive direct-light queries, denoise sample count and checkerboard/upscale rate.
-- Dynamic dispatch is an optimization layer on top of the layered compute contract. The first implementation may use fixed `dispatch(xGroups, yGroups, viewCount)` with early-out; later implementations may build per-view tile lists and issue indirect dispatch for selected passes.
+- Dynamic dispatch is an optimization layer on top of the layered compute contract. The current bring-up may use fixed `dispatch(xGroups, yGroups, viewCount)` with pixel early-out, but the next scheduling milestone should build per-view tile queues and issue indirect dispatch for selected expensive passes instead of adding a tile-level early-out-only stage.
 
 ### 12.6 Compose and Downstream Modules
 
@@ -2934,20 +2941,22 @@ Goal: make Deferred RT a useful hybrid renderer and produce denoiser-valid split
 Implementation steps:
 
 - Add `classify_deferred_pixels.comp`.
-- Generate internal masks or compacted queues for:
+- Generate internal masks and compacted tile queues for:
   - valid primary surface,
   - sky/background,
   - direct-light visibility eligible,
   - diffuse GI eligible,
   - specular/reflection eligible,
   - transparent/refraction eligible.
-- Skip ray queries for sky/background and invalid pixels.
+- Apply the OpenXR visibility mask before queue generation so hidden-area pixels do not enter any queue.
+- Dispatch reflection, GI and refraction from compacted per-view queues instead of full-screen dispatch once the queue path exists.
 - Skip reflection rays for high-roughness or non-specular pixels according to a documented threshold.
 
 Completion standard:
 
 - Debug counters report how many pixels enter each lighting path.
 - High-roughness diffuse surfaces do not run reflection queries.
+- Reflection/GI/refraction queue counters report active tile counts per view/layer, and indirect dispatch arguments match those counts.
 
 #### 5.2 Add ray-query direct lighting
 
@@ -3462,7 +3471,8 @@ These should be answered during Phase 3-5:
 8. Should macOS shaderpacks use separate `.metal` files, generated MSL from a shared source, or a restricted GLSL dialect translated by tooling?
 9. Which deferred RT features are mandatory on macOS, and which are quality-tier optional?
 10. Should the first Vulkan raster implementation use multiview render passes immediately, or ship per-layer fallback first while preserving the same shaderpack contract?
-11. Should foveated rendering influence ray-query dispatch density in phase 1, or only after layered correctness is proven? It must not reduce primary G-buffer fidelity inside the visible mask in the first versions.
+11. What tile size should Deferred RT use for the first queue builder: 8x8 for tighter culling, 16x16 for lower queue overhead, or a runtime attribute?
+12. Should foveated rendering influence secondary queue density immediately after OpenXR visibility-mask clipping lands, or only after layered queue correctness is proven? It must not reduce primary G-buffer fidelity inside the visible mask in the first versions.
 
 ---
 
@@ -3498,11 +3508,13 @@ The third milestone should prove the actual deferred RT role:
 ```text
 Layered G-buffer
   -> classify_deferred_pixels
+  -> OpenXR visibility mask marks hidden-area pixels invalid per eye when available
+  -> compact per-view queues for reflection/GI/refraction candidates
   -> direct_lighting ray query for sun/moon shadows
-  -> simple reflection ray query for low-roughness pixels
+  -> simple reflection ray query for low-roughness pixels via queued work
   -> compose
   -> transparent_forward fallback
   -> stereo offline fixture passes
 ```
 
-At that point the module has the right shape: raster primary visibility, ray-query secondary visibility, transparent forward fallback, and VR layers. GI, SHARC, compaction and advanced transparent RT can then be added without changing the public architecture.
+At that point the module has the right shape: raster primary visibility, ray-query secondary visibility, queued expensive secondary work, transparent forward fallback, and VR layers. GI quality, SHARC and advanced transparent RT can then be added without changing the public architecture.

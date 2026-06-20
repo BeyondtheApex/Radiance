@@ -12,7 +12,7 @@ Status: in progress
 - Vulkan SDK: `D:\VulkanSDK\1.4.335.0`
 - Python: `C:\ProgramData\miniconda3`
 - JDK: `C:\Program Files\Zulu\zulu-21`
-- Current date: 2026-06-19
+- Current date: 2026-06-20
 - Shell: PowerShell
 
 ## Implementation Requirements
@@ -1357,3 +1357,48 @@ Status: in progress
   - Implement actual Deferred-stage command recording and resource binding.
   - Add a built-in `vanilla-deferred-rt` pack after fixed native Deferred passes are represented as shaderpack passes.
   - Add an offline shaderpack lint/parser path for Deferred packs.
+
+### Step 33: Deferred RT Visibility Mask and Queue Scheduling
+
+- Status: completed.
+- Reason for this step:
+  - Reflection and GI ray-query passes currently use full-resolution layered dispatch with pixel-level early-out from the classification mask. That was acceptable for bring-up, but it is not the intended performance path.
+  - A tile-only early-out stage is not worth making a milestone: once the renderer classifies work per tile, it should compact active work and dispatch queued entries instead of returning to full-screen dispatch.
+  - OpenXR hidden-area pixels are never displayed and should be removed before G-buffer/classification/secondary-ray scheduling. This is distinct from foveated quality reduction.
+  - Commit `a6dc2a371edd902211cd77f27162dc5e839fdaba` already added the useful OpenXR-side foundation: `XR_KHR_visibility_mask` discovery, `xrGetVisibilityMaskKHR` query, and per-eye hidden-area mesh storage. That should be used as reference for Deferred RT mask ingestion. Do not re-add PT-module mask early-out; PT is ray-tracing-pipeline shaped and does not benefit enough to justify touching it now.
+- Updated architecture policy:
+  - `visibility:primary_mask` now represents valid primary pixels after G-buffer and OpenXR visibility-mask clipping.
+  - `classification:lighting_queues` replaces the old loose `classification:lighting_tiles` wording and means compacted per-view tile/pixel queues plus indirect dispatch arguments.
+  - Pixel-level early-out remains a defensive validation path for stale queue entries, bounds and debugging. It is not the main scheduling mechanism after queues exist.
+- Implemented:
+  - Added `deferred_rt_lighting_queue` as the CPU/GPU ABI contract for the first queue scheduler.
+  - Chose a fixed 16x16 tile size for the first implementation.
+  - Added Descriptor Set 7 for visibility and queue resources:
+    - binding 0: `R32_UINT` visibility mask image,
+    - binding 1: compacted tile record buffer,
+    - binding 2: queue header/counter buffer,
+    - binding 3: `VkDispatchIndirectCommand` argument buffer.
+  - Added queue kinds for direct light, reflection, GI and refraction. Each kind has a fixed record partition, a header with offset/capacity/count/overflow and one indirect dispatch command.
+  - Added per-frame visibility mask images and CPU upload buffers.
+  - When OpenXR hidden-area mesh data is available, Deferred RT rasterizes the per-eye hidden mesh into the visibility mask. If OpenXR data is not available yet, the mask uploads as all-valid and reuploads once the hidden mesh becomes available.
+  - `classify.comp` now reads the visibility mask and writes `PixelClassificationNone` for hidden pixels.
+  - Added `build_lighting_queues.comp` after classification. It reads classification plus visibility, emits compacted tile records and increments indirect group counts.
+  - Reflection and GI now dispatch through `vkCmdDispatchIndirect` from the reflection/GI queue partitions. Their common shader code resolves the invocation tile record before processing pixels inside the tile.
+  - Direct light remains full-resolution dispatch for now, but the direct-light queue is built and reported in diagnostics so empty-tile rates can drive the later decision.
+  - Refraction queue records can be emitted by the queue ABI, but the transparent/refraction pass does not consume them yet because the transparent path is still a later phase.
+  - Deferred RT diagnostics now include visibility mask stats and per-kind queue active/overflow tile counts.
+  - Added CPU tests for the queue ABI, dimensions, indirect offsets, stats conversion and OpenXR-style hidden mesh rasterization.
+  - Extended classification and diagnostics tests for hidden visibility pixels and queue reporting.
+- Synchronization notes:
+  - Queue headers and indirect args are initialized through persistent staging each frame.
+  - Queue-builder writes are synchronized before shader reads and indirect dispatch.
+  - Queue headers are copied back for next-frame diagnostics and then transitioned back to compute shader reads before reflection/GI consume them.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target shaders core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully with `D:\VulkanSDK\1.4.335.0\Bin` prepended to `PATH` for `glslangValidator.exe`.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 9/9 tests passed.
+- Remaining work:
+  - G-buffer rasterization still does not use stencil/scissor/hidden-area clipping directly. Hidden OpenXR pixels are removed at classification/queue scheduling, but the earliest G-buffer-stage clipping policy still needs a later pass-level implementation.
+  - Direct light still uses full dispatch plus pixel classification checks; the direct queue exists for stats and future migration.
+  - Refraction/transparent queue consumption is not implemented until the dedicated transparent/refraction path.
+  - First queue records store tile coordinates plus flags only. Packed active pixel bounds can be added later if diagnostics show sparse-tile waste.
+  - Foveated secondary-work density is not implemented yet. It should map onto queue emission, resolution tier or sample-count policy without reducing primary G-buffer fidelity inside the OpenXR visible area.
