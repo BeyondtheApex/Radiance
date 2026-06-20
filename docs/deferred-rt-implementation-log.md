@@ -1538,3 +1538,47 @@ Status: in progress
   - Direct light remains full-screen `screen` dispatch in `vanilla-deferred-rt`; the direct queue is built for diagnostics and future migration.
   - Transparent/refraction queue consumption remains deferred to the dedicated transparent/refraction path.
   - Stronger named resource validation for Deferred scene/G-buffer/queue resources should be added with the diagnostics/offline report chain.
+
+### Step 36: Deferred Shaderpack Explicit Pass Semantics
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/src/shader/world/deferred_rt/internal/vanilla-deferred-rt/configs.json`
+  - `MCVR-custom/tests/deferred_rt_shaderpack_test.cpp`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Step 35 moved pass list, shader files and execution order into `vanilla-deferred-rt`, but the hardened Deferred runtime still identified some fixed sync/barrier hooks by pass `name`.
+  - That made custom pass names unsafe: a pack author could rename `classify`, `build_lighting_queues`, `reflection`, `gi` or `compose` and accidentally disable required C++ synchronization.
+  - The runtime needs two separate concepts:
+    - `name`: the pack-local execution reference and debug label,
+    - `semantic`: the fixed ABI tag consumed by C++ for hardened synchronization and diagnostics.
+- Implemented:
+  - Added optional `semantic` parsing to `full_screen`, `render`, `ray_tracing`, `compute` and Deferred `ray_query` pass configs.
+  - Changed Deferred fixed synchronization hooks to check `pass.semantic`, not `pass.name`.
+  - Updated built-in `vanilla-deferred-rt/configs.json` to declare explicit semantics for:
+    - `clear_contract`,
+    - `gbuffer`,
+    - `classify`,
+    - `build_lighting_queues`,
+    - `direct_light`,
+    - `reflection`,
+    - `gi`,
+    - `compose`.
+  - Kept execution command lookup keyed by pass `name`; `semantic` is not an alias and cannot be used in `execution.deferred.commands`.
+  - Renamed the Deferred full-screen compute runtime's internal top-level pass reference from `semanticName` to `executionName` so it cannot be confused with the new JSON `semantic`.
+  - Added a runtime-plan test showing that a pass can be named `custom_classification` with `semantic: classify`, and that execution must still reference `custom_classification`.
+- Synchronization notes:
+  - Pass-name-based sync hazards are resolved for the existing Deferred fixed hooks.
+  - A pack that omits a fixed semantic will not trigger that hardened hook. This is intentional; the built-in pack declares all required semantics and future lint/offline validation should report missing required semantics for packs that target the full built-in pipeline contract.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully with `D:\VulkanSDK\1.4.335.0\Bin` prepended to `PATH`.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 9/9 tests passed.
+- Remaining work:
+  - Add shaderpack lint/offline validation for required Deferred ABI semantics, duplicate semantic tags and semantic/pass type compatibility.
+  - Move `ScenePrepare` and `SceneProviderFactory` lifetime to `WorldPipeline` scope so PT and Deferred share scene runtime cleanly.
+  - Add in-game, VR and preset switching tests before freezing the framework.

@@ -98,7 +98,7 @@ The module is independent from the existing `RayTracingModule`, but it should re
 - post-render integration,
 - NRD/upscaler/temporal-compatible output buffers where possible.
 
-Current implementation note as of Step 35:
+Current implementation note as of Step 36:
 
 - `ShaderPackLoader` has a third metadata stage, `stage: deferred`.
 - The loader accepts both `execution_deferred` and nested `execution.deferred`.
@@ -116,6 +116,8 @@ Current implementation note as of Step 35:
 - The Deferred shaderpack runtime binds a module-owned scene descriptor set with world/sky uniforms, G-buffer draw/view buffers, classification/visibility masks, lighting queue buffers, texture mapping and TLAS. User-declared runtime textures/buffers and execution variables use the existing `ShaderPack` descriptor model.
 - `vanilla-deferred-rt` is a real built-in pack under `MCVR-custom/src/shader/world/deferred_rt/internal/vanilla-deferred-rt` and is installed as `shaders/world/deferred_rt/vanilla-deferred-rt.zip`.
 - The old fixed Deferred `.spv` runtime path has been removed. G-buffer, classification, queue build, direct light, queued reflection/GI and compose are now declared by the pack and recorded by the hardened Deferred runtime.
+- Deferred pass metadata has an explicit optional `semantic` field. `name` remains the execution-command reference and author-facing debug name; C++ fixed Deferred compute synchronization hooks use `semantic`, not pass names.
+- The built-in `vanilla-deferred-rt` pack declares fixed ABI semantics for `clear_contract`, `gbuffer`, `classify`, `build_lighting_queues`, `direct_light`, `reflection`, `gi` and `compose`, so authors may rename pass `name` values without changing the hardened runtime sync points as long as the semantic tags stay correct.
 - C++ still owns Vulkan resources, descriptor layouts, TLAS binding, queue buffers, indirect dispatch offsets, barriers, push constants and pass scheduling semantics. The pack owns pass order, shader files, high-level schedules and optional runtime resources.
 - Pack dispatch schedules are high-level: `screen`, `tile_grid`, `direct`, and `lighting_queue`. `lighting_queue` names a queue kind, but C++ resolves the indirect argument buffer and offset.
 - Existing PT and PostRender shaderpacks continue to use the same loader and execution model.
@@ -3058,21 +3060,23 @@ Goal: make the fixed pipeline user-customizable without exposing PT concepts or 
 
 #### 6.1 Extend shaderpack metadata
 
-Implementation status as of Step 34: complete enough for Deferred compute runtime bring-up. The shared loader
-understands `stage: deferred`, `execution_deferred` and nested `execution.deferred`, and rejects Deferred-stage
-passes that try to use PT/SBT fields such as `rgen`, `hit_groups`, `rchit`, `rahit` or `query_sharc`. The loader
-also accepts `ray_query` as a Deferred-only pass kind. Java and native selection support Deferred RT as a shaderpack
-owner through `render_pipeline.module.deferred_rt.attribute.shader_pack_path`. Native shaderpack runtimes are stored
-by owning module so PT, Deferred RT and PostRender can use different packs in the same graph.
+Implementation status as of Step 36: the Deferred shaderpack runtime and built-in pack migration are complete for the
+current raster + ray-query path. The shared loader understands `stage: deferred`, `execution_deferred` and nested
+`execution.deferred`, and rejects Deferred-stage passes that try to use PT/SBT fields such as `rgen`, `hit_groups`,
+`rchit`, `rahit` or `query_sharc`. The loader also accepts `ray_query` as a Deferred-only pass kind. Java and native
+selection support Deferred RT as a shaderpack owner through
+`render_pipeline.module.deferred_rt.attribute.shader_pack_path`. Native shaderpack runtimes are stored by owning module
+so PT, Deferred RT and PostRender can use different packs in the same graph.
 
-`DeferredRtModule` now builds a Deferred runtime plan and can execute Deferred `compute`, supported `ray_query`,
-and `full_screen` `compute_3d` passes through the stage execution command list. Unsupported render/graphics
-full-screen passes may exist in metadata, but a Deferred execution command that references them fails during module
-build with a clear runtime-plan error.
+`DeferredRtModule` builds a Deferred runtime plan and executes Deferred `render`, `compute`, supported `ray_query`
+with optional fallback compute, and `full_screen` `compute_3d` passes through the stage execution command list.
+`render` currently supports the hardened `content: minecraft_gbuffer` backend. Unsupported runtime pass content fails
+during module build with a clear runtime-plan error.
 
-The remaining gap is shaderpack migration, not basic runtime dispatch: the current fixed native G-buffer,
-classification, direct lighting, queued reflection/GI and compose path has not yet been represented as a built-in
-Deferred shaderpack.
+The fixed native shader-source path has been migrated into built-in `vanilla-deferred-rt`: G-buffer, classification,
+queue build, direct lighting, queued reflection/GI and compose are declared by the pack and recorded by the hardened
+Deferred runtime. Runtime synchronization is no longer keyed by pass `name`; fixed C++ hooks use the explicit optional
+pass `semantic` field, while execution commands still reference `name`.
 
 Shaderpack selection is module-scoped:
 
@@ -3119,7 +3123,7 @@ Implementation steps:
   - SBT-style shader/hit fields, completed in Step 29,
   - PT hit groups, completed in Step 29.
 
-Remaining implementation steps after Step 35:
+Remaining implementation steps after Step 36:
 
 - Move `ScenePrepare` and `SceneProviderFactory` lifetime to `WorldPipeline` scope so PT and Deferred can share prepared scene runtime without per-module duplication.
 - Add resource validation for Deferred-stage internal images, public exports and scene draw streams.
@@ -3135,7 +3139,7 @@ Completion standard:
 - A pack using PT-only declarations fails before rendering with a clear error. The PT-only part is covered by Step 29,
   unknown Deferred execution pass references are covered by Step 30, and module/stage compatibility is covered by
   Step 31. Runtime-plan validation for `render`, `compute`, `ray_query`, fallback ray-query, `lighting_queue` schedule
-  and `full_screen compute_3d` is covered by Steps 34-35.
+  and `full_screen compute_3d` is covered by Steps 34-35. Explicit pass `semantic` separation is covered by Step 36.
 
 #### 6.2 Add view/layer execution declarations
 
