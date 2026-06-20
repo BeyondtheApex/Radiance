@@ -129,6 +129,7 @@
   "render_pipeline.module.tone_mapping.attribute.saturation": "Saturation",
   "render_pipeline.module.tone_mapping.attribute.clamp_output": "Should Clamp Output",
   "render_pipeline.module.post_render.name": "Post Render",
+  "render_pipeline.module.post_render.attribute.shader_pack_path": "Shader Pack Path",
   "render_pipeline.module.post_render.attribute.star_count": "Star Count",
   "render_pipeline.module.post_render.attribute.star_min_size": "Star Min Size",
   "render_pipeline.module.post_render.attribute.star_max_size": "Star Max Size",

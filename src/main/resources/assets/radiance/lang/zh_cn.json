@@ -129,6 +129,7 @@
   "render_pipeline.module.tone_mapping.attribute.saturation": "饱和度",
   "render_pipeline.module.tone_mapping.attribute.clamp_output": "裁剪输出",
   "render_pipeline.module.post_render.name": "后渲染",
+  "render_pipeline.module.post_render.attribute.shader_pack_path": "光影包路径",
   "render_pipeline.module.post_render.attribute.star_count": "星星数量",
   "render_pipeline.module.post_render.attribute.star_min_size": "星星最小尺寸",
   "render_pipeline.module.post_render.attribute.star_max_size": "星星最大尺寸",

@@ -66,7 +66,7 @@ public class ShaderPackSettingsScreen extends Screen {
     @Override
     public void close() {
         if (module != null) {
-            Pipeline.getModuleAttributes(module);
+            Pipeline.getModuleAttributes();
             Pipeline.savePipeline();
         }
         MinecraftClient.getInstance().setScreen(parent);

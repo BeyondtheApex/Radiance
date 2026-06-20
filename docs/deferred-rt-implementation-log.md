@@ -1306,3 +1306,54 @@ Status: in progress
   - Add tests or fixtures for Java shaderpack stage inspection once a Java-side test harness exists.
   - Add a built-in `vanilla-deferred-rt` pack after fixed native Deferred passes are represented as shaderpack passes.
   - Add an offline shaderpack lint/parser path for Deferred packs.
+
+### Step 32: Explicit Shaderpack Ownership for PostRender
+
+- Status: completed.
+- Target files:
+  - `Radiance-custom/src/main/java/com/radiance/client/pipeline/Pipeline.java`
+  - `Radiance-custom/src/main/java/com/radiance/client/gui/ShaderPackSettingsScreen.java`
+  - `Radiance-custom/src/main/resources/modules/post_render.yaml`
+  - `Radiance-custom/src/main/resources/assets/radiance/lang/en_us.json`
+  - `Radiance-custom/src/main/resources/assets/radiance/lang/zh_cn.json`
+  - `MCVR-custom/src/core/middleware/com_radiance_client_pipeline_Pipeline.cpp`
+  - `MCVR-custom/src/core/render/pipeline.cpp`
+  - `MCVR-custom/src/core/render/modules/world/post_render/post_render_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/post_render/post_render_module.cpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.cpp`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Dynamic pipeline switching needs shaderpack ownership to belong to modules, not to one implicit world-level primary pack.
+  - PostRender is shaderpack-backed today, so leaving it attached to whichever PT/Deferred runtime happens to be primary makes it difficult to support one pipeline using different packs for different shaderpack-capable modules.
+  - Current UI still exposes a single Shader Pack screen for the primary PT/Deferred owner, so this step needed a compatibility bridge instead of a full UI redesign.
+- Implemented:
+  - Added `render_pipeline.module.post_render.attribute.shader_pack_path` to `post_render.yaml`.
+  - Made Java treat PostRender as a shaderpack-capable module with required stage `post_render`.
+  - Kept `Pipeline.getShaderPackModule()` focused on the primary PT/Deferred owner so the existing Shader Pack screen behavior stays unchanged.
+  - Changed `setShaderPack(...)` so choosing a PT or Deferred pack also writes that pack to other shaderpack-capable modules in the graph only when the pack supports the target module's stage.
+  - Added a temporary same-pack dynamic attribute sync: if PT/Deferred and PostRender resolve to the same physical pack, the primary owner's dynamic shaderpack attribute values are copied to the other module before saving/building. This preserves current single-screen settings behavior until the preset UI can configure per-module packs directly.
+  - Split shaderpack dynamic attribute storage by module stage for non-PT owners:
+    - PT keeps the historical `<pack>.txt` file.
+    - PostRender uses `<pack>.post_render.txt`.
+    - Deferred uses `<pack>.deferred.txt`.
+    - Reading still falls back to the legacy `<pack>.txt` file when no module-scoped file exists.
+  - Added native PostRender dynamic attribute discovery through the existing `Pipeline.getAttributes(...)` JNI bridge.
+  - Added `ShaderPack::buildConfigFromPostRenderAttributes(...)` with `requiredStage = PostRender`.
+  - Changed `WorldPipeline` to build a PostRender-owned shaderpack runtime.
+  - Changed `PostRenderModule` to consume `worldPipeline->shaderPackForModule(PostRenderModule::NAME)` instead of the primary compatibility runtime.
+  - Scoped non-PT runtime resources to the owning stage's pass graph so PostRender does not instantiate PT-only global runtime textures/buffers from a combined PT/PostRender pack.
+  - Updated the architecture document with the Step 32 owner policy and temporary UI bridge.
+- Verification:
+  - `gradlew.bat classes` completed successfully with `JAVA_HOME=C:\Program Files\Zulu\zulu-21`.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 8/8 tests passed.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target INSTALL -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully and installed the updated `core.dll` plus shader resources.
+- Remaining work:
+  - Replace the temporary single-screen sync with a preset UI/storage model that explicitly configures the pipeline and each shaderpack-capable module's pack.
+  - Define and validate the cross-module shaderpack resource rule. Current runtime assumes no implicit cross-module shaderpack resources; shared data must move through explicit pipeline resources.
+  - Add Java-side tests for module-stage discovery and compatible sync behavior when a suitable test harness exists.
+  - Implement actual Deferred-stage command recording and resource binding.
+  - Add a built-in `vanilla-deferred-rt` pack after fixed native Deferred passes are represented as shaderpack passes.
+  - Add an offline shaderpack lint/parser path for Deferred packs.
