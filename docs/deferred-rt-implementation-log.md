@@ -1621,15 +1621,16 @@ Status: in progress
     rejection and fixed semantic type mismatch rejection.
 - Public schema requirements recorded:
   - `execution.deferred.commands` is a transition/runtime IR, not the desired long-term Deferred authoring model.
-  - Deferred public schema should become `slots` + `passes` + `insertions` + `resources`, normalized by C++ into the
-    internal command list.
+  - Deferred public schema should become `slots` + custom `passes` + phase `insertions`, plus the existing ShaderPack
+    runtime texture/buffer declarations, normalized by C++ into the internal command list.
   - Pack author requirements now tracked explicitly:
-    - attributes/uniforms with UI metadata such as default/min/max,
-    - simple defines and future variants/permutations,
-    - feature requirements and fallback policy,
-    - resource lifetime policy (`per_frame`, `history`, `persistent`, `imported_texture`),
-    - debug outputs for logical resources,
-    - offline lint / expanded graph report.
+    - attributes/uniforms should reuse the existing ShaderPack `attributes` array schema,
+    - simple defines should reuse attribute `define` and pass `define`/`defines`/`definitions`,
+    - missing feature requirements and fallback validation,
+    - missing resource lifetime policy (`per_frame`, `history`, `persistent`, `imported_texture`) on top of existing
+      imported/intermediate/shared resource handling,
+    - missing debug outputs for logical resources,
+    - missing offline lint / expanded graph report.
 - Verification:
   - `cmake --build MCVR-custom/build-radiance-custom --config Release --target deferred_rt_shaderpack_test -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
   - `MCVR-custom/build-radiance-custom/tests/Release/deferred_rt_shaderpack_test.exe` completed successfully.
@@ -1637,10 +1638,45 @@ Status: in progress
   - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 9/9 tests passed.
 - Remaining work:
   - Build the new Deferred public schema parser/normalizer for `slots`, custom `passes`, phase `insertions` and
-    pack-owned logical `resources`.
+    pack-owned logical resources declared through the existing ShaderPack texture/buffer resource syntax where possible.
   - Lower the normalized schema to the existing internal runtime pass registry and ordered command list.
   - Add resource visibility rules per phase and enforce them in validation/lint.
-  - Extend the existing ShaderPack attribute/definition system with Deferred's compact object/map form, simple root
-    defines and UI metadata.
-  - Implement feature/fallback validation and debug output registry.
-  - Add the offline lint/report command.
+  - Do not add a Deferred-only compact `attributes` object/map. Reuse the PT-compatible root `attributes` array:
+    `name`, `type`, `default_value`, and `define`.
+  - Make Deferred built-in empty-path attribute discovery match PT behavior: load `vanilla-deferred-rt` and return its
+    attributes instead of returning an empty list.
+  - Reuse pass-level `define`/`defines`/`definitions` and attribute `define` for simple defines. Add common/root
+    definitions only if they merge into the same existing definitions model without a new competing syntax.
+  - Implement the missing parts: device capability requirements/fallback validation, explicit resource lifetime policy,
+    debug output registry, and offline lint/report command.
+
+### Step 37.1: ShaderPack Authoring Feature Reuse Audit
+
+- Status: completed documentation audit.
+- Scope:
+  - Compared the new Deferred authoring requirements against the existing PT/ShaderPack loader and Java attribute UI.
+  - No runtime code was changed in this audit.
+- Existing capabilities to reuse:
+  - Root `attributes` is already an array parsed by `ShaderPackLoader::parseAttributeConfig`.
+  - Attribute entries already use `name`, `type`, `default_value`, and `define`.
+  - Existing useful attribute `type` forms include scalar/bool/range/enum forms such as `bool`, `int`, `float`,
+    `int_range:min-max`, `float_range:min-max`, and `enum:a-b-c`. Java UI also has generic string/vector widgets.
+  - Attribute `define` already emits shader definitions from configured values and supports expression-style mappings.
+  - Pass-level shader definitions already accept `define`, `defines`, or `definitions` through the same parser.
+  - `fallback_compute` already exists for Deferred compute/ray-query style pass configs.
+  - ShaderPack runtime resources already support imported file textures, intermediate textures, runtime buffers and
+    the existing `shared` lifetime-like flag.
+- Missing capabilities to implement later:
+  - Deferred `getAttributes()` currently returns an empty attribute list when the shaderpack path is empty; PT loads its
+    built-in pack in that case. Deferred should load built-in `vanilla-deferred-rt` so built-in pack attributes appear
+    in UI/preset flows.
+  - No explicit device-capability requirement model exists for ray query, multiview, storage image format support,
+    half precision, etc.
+  - No explicit resource lifetime enum exists for `per_frame`, `history`, `persistent`, or `imported_texture`.
+    Existing `type: file`, `type: intermediate`, and `shared` should be preserved and extended rather than replaced.
+  - No debug output registry exists for exposing pack-owned logical resources to debug views/offline reports.
+  - No offline lint / expanded graph report command exists yet.
+- Design correction:
+  - Deferred should not introduce a second attribute/uniform syntax. If a new Deferred public schema needs to normalize
+    data internally, the author-facing syntax should stay compatible with the existing PT ShaderPack schema unless there
+    is no existing equivalent.

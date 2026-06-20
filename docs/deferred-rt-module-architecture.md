@@ -3166,9 +3166,9 @@ The first stable Deferred public schema should keep the C++ backbone fixed and e
 - `slots`: map of fixed semantic slots. Slot key is the fixed semantic (`gbuffer`, `classify`, `direct_light`,
   `reflection`, `gi`, `compose`, etc.). Pack authors can replace the shader implementation, but cannot create new fixed
   semantic names.
-- `resources`: pack-owned logical images/textures/buffers. Authors name resources such as `custom.ssao` and
-  `custom.noise`; C++ owns the actual Vulkan image/buffer allocation, descriptor slots, layouts, barriers, resizing and
-  VR layer handling.
+- `resources`: pack-owned logical images/textures/buffers declared through the existing ShaderPack texture/buffer
+  resource model where possible. Authors name resources such as `custom.ssao` and `custom.noise`; C++ owns the actual
+  Vulkan image/buffer allocation, descriptor slots, layouts, barriers, resizing and VR layer handling.
 - `passes`: custom extension passes. First stable version should allow compute/full-screen compute only. Custom passes
   must not declare fixed `semantic`; they are connected through `insertions` plus `inputs`/`outputs`.
 - `insertions`: phase lists such as `{ "after_classify": ["custom_ssao"] }`. The list order is the phase-local
@@ -3177,14 +3177,18 @@ The first stable Deferred public schema should keep the C++ backbone fixed and e
 Required authoring features:
 
 - Attributes/uniforms:
-  - Existing `ShaderPack` attributes already provide static attribute values, shader define generation and expression
-    variables. Deferred's new schema should support a compact object/map form with UI metadata such as `default`,
-    `min` and `max`, then lower it into the existing attribute system.
-  - Runtime tuning values needed by shaders should lower to Deferred execution variables or generated uniform buffers,
-    not hard-coded constants.
+  - Reuse the existing PT-compatible root `attributes` array syntax. Do not add a Deferred-only compact object/map
+    syntax unless a future requirement cannot be represented by the shared ShaderPack model.
+  - Existing entries use `name`, `type`, `default_value`, and optional `define`. Range UI should continue to use the
+    existing type strings such as `int_range:min-max`, `float_range:min-max`, and `enum:a-b-c`.
+  - Attribute `define` already provides static shader definitions from configured values. Runtime tuning values needed by
+    shaders should reuse that path first; if true runtime uniforms are needed later, add them as an explicit extension to
+    the shared ShaderPack model rather than a Deferred-only syntax.
 - Defines/permutations:
-  - Keep simple root/pass defines as a first-class feature, e.g. `RADIANCE_HIGH_QUALITY_GI` and
-    `RADIANCE_USE_BLUE_NOISE`.
+  - Reuse pass-level `define`, `defines`, or `definitions`, and attribute-level `define`, for simple compile-time
+    switches such as `RADIANCE_HIGH_QUALITY_GI` and `RADIANCE_USE_BLUE_NOISE`.
+  - Add common/root definitions only if they can merge into the same existing definitions model without creating a
+    second syntax.
   - Variant/permutation support can stay minimal in the first version, but the schema should not block
     `quality: low/medium/high/ultra` style variants later.
 - Feature requirements/fallbacks:
@@ -3192,7 +3196,10 @@ Required authoring features:
     format support, half precision and similar device-dependent features.
   - The runtime must choose supported fallback shaders or fail at build/lint time with a precise error.
 - Resource lifetime policy:
-  - Pack-owned resources must declare lifetime: `per_frame`, `history`, `persistent` or `imported_texture`.
+  - Existing resources already distinguish imported file textures, intermediate runtime resources and `shared` resources.
+    Preserve that syntax.
+  - Add an explicit lifetime policy only for the missing cases that need it: `per_frame`, `history`, `persistent` or
+    `imported_texture`.
   - `history` resources are required for temporal effects and must survive across frames with correct resize handling.
 - Debug outputs:
   - Pack authors must be able to expose logical resources to debug views and offline tools, for example SSAO, wetness,
