@@ -1965,3 +1965,88 @@ Status: in progress
   - Full variants/permutations, generic fallback policy, debug outputs and offline lint/expanded graph reporting remain
     future public-schema/tooling work.
   - Only after Step 41 is closed should work resume on the larger shared scene runtime route.
+
+### Step 41: Deferred Resource Lifetime Policy
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/shader_pack/shader_pack.cpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_module.cpp`
+  - `MCVR-custom/tests/shader_pack_deferred_schema_test.cpp`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Step 39 made custom resources logical graph nodes, but resource lifetime was still implicit through imported file
+    textures, per-frame runtime resources and the older `shared` flag.
+  - Deferred public packs need a temporal history model that shader authors can use without writing descriptor sets,
+    binding numbers, image layouts, barriers or manual ping-pong state.
+- Implemented:
+  - Added explicit resource lifetimes:
+    - `per_frame`,
+    - `history`,
+    - `persistent`,
+    - `imported_texture`.
+  - Applied lifetime parsing to both preserved root `textures` / `buffers` syntax and public `resources.images` /
+    `resources.textures` / `resources.buffers` wrapper syntax.
+  - Preserved compatibility defaults:
+    - file/imported textures default to `imported_texture`,
+    - `shared: true` defaults to `persistent`,
+    - non-shared runtime resources default to `per_frame`.
+  - Added validation for invalid combinations:
+    - imported textures must use `imported_texture`,
+    - buffers cannot use `imported_texture`,
+    - explicit `lifetime` cannot contradict an explicit `shared` flag,
+    - `history` images cannot be imported and must include storage usage, including preserved root `textures` entries.
+  - Added history resource registry tracking for custom images and buffers.
+  - Added `.previous` as an input-only logical alias for custom `history` resources:
+    - `custom.temporal.previous` reads the previous slot,
+    - outputs to `.previous` are rejected,
+    - `.previous` on non-history resources is rejected,
+    - `.previous` is not supported for protected built-in namespaces in the first version.
+  - Runtime resources now allocate by lifetime:
+    - `persistent`: one instance,
+    - `per_frame`: one instance per swapchain frame,
+    - `history`: two instances per swapchain frame.
+  - Added previous descriptor bindings and generated shader definitions:
+    - `RADIANCE_RESOURCE_<NAME>_PREVIOUS_SAMPLED_BINDING`,
+    - `RADIANCE_RESOURCE_<NAME>_PREVIOUS_STORAGE_BINDING`,
+    - `RADIANCE_RESOURCE_<NAME>_PREVIOUS_BUFFER_BINDING`.
+  - Added per-frame history slot management:
+    - `beginRuntimeFrame(frameIndex)` flips the current slot after the frame has valid history,
+    - `.previous` always points to the opposite slot, so first-frame previous reads the zero-cleared slot instead of
+      aliasing the current output slot,
+    - `completeRuntimeFrame(frameIndex)` marks that frame's history valid.
+  - Added history reset and clear paths:
+    - runtime resource rebuild resets history slots and clears all history images/buffers to zero,
+    - shaderpack pre-close clears the runtime history state,
+    - history buffer expression-size rebuilds reset and clear history,
+    - history images/buffers are created with transfer-destination usage so the zero-clear path is valid.
+  - Deferred runtime resource barriers now normalize `.previous` names and barrier previous images/buffers separately.
+  - Full-screen compute targets are treated as implicit runtime outputs for barrier recording, matching Step 39 schema
+    validation.
+  - Added schema tests for:
+    - default lifetimes for wrapper resources,
+    - explicit `history`, `persistent` and `imported_texture`,
+    - root `textures` / `buffers` history lifetimes,
+    - previous binding allocation,
+    - invalid `shared` / `lifetime` combinations,
+    - root `history` image rejection when `storage_binding` is missing,
+    - `.previous` output rejection,
+    - `.previous` on non-history resources.
+- Deliberately deferred:
+  - Engine-level reset events for camera cuts, dimension/world changes and major render-scale changes still need a
+    dedicated signal path. Step 41 implements the resource-side reset behavior and hooks it into runtime rebuild,
+    shaderpack reload/pre-close and history buffer resize paths.
+  - Full variant/permutation selection, generic fallback objects, debug output registry and offline lint / expanded graph
+    reports remain future public-schema/tooling work.
+  - Deferred built-in empty-path `getAttributes()` parity with PT remains open.
+- Verification:
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target shader_pack_deferred_schema_test -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `G:\cpp\radiance\MCVR-custom\build-radiance-custom\tests\Release\shader_pack_deferred_schema_test.exe` completed successfully.
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target core -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target deferred_rt_shaderpack_test -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `G:\cpp\radiance\MCVR-custom\build-radiance-custom\tests\Release\deferred_rt_shaderpack_test.exe` completed successfully.
+  - `cmake --build G:\cpp\radiance\MCVR-custom\build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `ctest --test-dir G:\cpp\radiance\MCVR-custom\build-radiance-custom -C Release --output-on-failure` completed successfully: 10/10 tests passed.

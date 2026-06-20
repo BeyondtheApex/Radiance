@@ -98,7 +98,7 @@ The module is independent from the existing `RayTracingModule`, but it should re
 - post-render integration,
 - NRD/upscaler/temporal-compatible output buffers where possible.
 
-Current implementation note as of Step 36:
+Current implementation note as of Step 41:
 
 - `ShaderPackLoader` has a third metadata stage, `stage: deferred`.
 - The loader accepts both `execution_deferred` and nested `execution.deferred`.
@@ -132,6 +132,13 @@ Current implementation note as of Step 36:
   `custom.*`; protected built-in namespaces such as `gbuffer.*`, `visibility.*`, `queue.*`, `lighting.*`, `scene.*`, and
   `out.*` are read-only and phase-gated for custom passes. C++ validates custom read-before-write, protected writes,
   undeclared resources, duplicate writes, and too-early built-in reads before runtime setup.
+- As of Step 40, Deferred public packs support root/common `define` / `defines` / `definitions`, plus root/pass/slot
+  `requires` for `ray_query`, `multiview`, `half_precision`, and `storage_image_format:<format>`. Ray-query passes use
+  `fallback_compute` when ray query is unavailable and a fallback shader is declared.
+- As of Step 41, pack-owned runtime images and buffers support explicit `lifetime`: `per_frame`, `history`,
+  `persistent`, and `imported_texture`. `history` resources allocate current/previous double-buffered instances per
+  swapchain image, expose `.previous` as an input-only logical alias, receive generated previous descriptor binding
+  macros, and are zero-cleared when runtime resources are rebuilt.
 - C++ still owns Vulkan resources, descriptor layouts, TLAS binding, queue buffers, indirect dispatch offsets, barriers, push constants and pass scheduling semantics. The pack owns pass order, shader files, high-level schedules and optional runtime resources.
 - Pack dispatch schedules are high-level: `screen`, `tile_grid`, `direct`, and `lighting_queue`. `lighting_queue` names a queue kind, but C++ resolves the indirect argument buffer and offset.
 - Existing PT and PostRender shaderpacks continue to use the same loader and execution model.
@@ -3153,7 +3160,7 @@ Implementation steps:
   - SBT-style shader/hit fields, completed in Step 29,
   - PT hit groups, completed in Step 29.
 
-Remaining implementation steps after Step 40:
+Remaining implementation steps after Step 41:
 
 - Deferred fixed semantic order validation while the runtime still accepts raw `execution.deferred.commands` is complete
   in Step 37.
@@ -3163,8 +3170,9 @@ Remaining implementation steps after Step 40:
   namespace validation, phase visibility and custom pass read/write validation are complete in Step 39.
 - Root/common definitions and first-version `requires` capability validation are complete in Step 40. The current
   capability set is `ray_query`, `multiview`, `half_precision` and `storage_image_format:<format>`.
-- Add explicit resource lifetime policy, including `per_frame`, `history`, `persistent`, `imported_texture`, temporal
-  current/previous descriptor naming and resize/reload/world-change resets.
+- Explicit resource lifetime policy is complete in Step 41 for `per_frame`, `history`, `persistent` and
+  `imported_texture`. Runtime resize and shaderpack reload reset history through resource rebuild/pre-close paths.
+  Explicit camera-cut, dimension/world-change and major render-scale reset signals still need engine hooks.
 - Move `ScenePrepare` and `SceneProviderFactory` lifetime to `WorldPipeline` scope so PT and Deferred can share prepared scene runtime without per-module duplication.
 - Expand preset storage/UI so a preset can configure the selected pipeline and each shaderpack-capable module's pack.
 - Define whether cross-module shaderpack resource references are forbidden by validation or represented through explicit
@@ -3195,7 +3203,7 @@ The first stable Deferred public schema should keep the C++ backbone fixed and e
   the first logical registry and phase-aware resource validation by lowering `resources.images`, `resources.textures` and
   `resources.buffers` to the existing runtime texture/buffer configuration path. Existing root `textures` and `buffers`
   are preserved; when used in a Deferred public-schema pack, they are also treated as pack-owned logical resources and
-  must use `custom.*`.
+  must use `custom.*`. Step 41 adds explicit `lifetime` to both wrapper resources and preserved root runtime resources.
 - `passes`: custom extension passes. First stable version should allow compute/full-screen compute only. Custom passes
   must not declare fixed `semantic`; they are connected through `insertions` plus `inputs`/`outputs`. Step 38 enforces
   compute or full-screen `compute_3d` only, rejects `lighting_queue` schedules for custom passes, and requires
@@ -3291,11 +3299,20 @@ Required authoring features:
     is unavailable and a fallback is declared, and fail validation when neither path is available.
   - A generic fallback object/key and a full backend permutation matrix are not implemented yet.
 - Resource lifetime policy:
-  - Existing resources already distinguish imported file textures, intermediate runtime resources and `shared` resources.
-    Preserve that syntax.
-  - Add an explicit lifetime policy only for the missing cases that need it: `per_frame`, `history`, `persistent` or
-    `imported_texture`.
-  - `history` resources are required for temporal effects and must survive across frames with correct resize handling.
+  - Step 41 adds explicit `lifetime` values: `per_frame`, `history`, `persistent`, and `imported_texture`.
+  - Compatibility defaults remain stable: imported file textures default to `imported_texture`, `shared: true` defaults
+    to `persistent`, and non-shared runtime resources default to `per_frame`.
+  - Explicit `lifetime` values that contradict `shared` are invalid. Buffers cannot use `imported_texture`, and file
+    textures must use `imported_texture`.
+  - `history` images must be writable storage resources in both wrapper `resources.images` syntax and preserved root
+    `textures` syntax. They allocate two instances per swapchain frame, expose current bindings plus previous bindings,
+    and use `custom.name.previous` as an input-only alias for the previous slot.
+  - Generated shader definitions include previous binding macros such as
+    `RADIANCE_RESOURCE_CUSTOM_SSAO_PREVIOUS_SAMPLED_BINDING`,
+    `RADIANCE_RESOURCE_CUSTOM_SSAO_PREVIOUS_STORAGE_BINDING`, and
+    `RADIANCE_RESOURCE_CUSTOM_TILES_PREVIOUS_BUFFER_BINDING`.
+  - Runtime resize and shaderpack reload clear history resources to zero through resource rebuild/pre-close paths.
+    Camera-cut, dimension/world-change and major render-scale reset signals still need explicit engine-level hooks.
 - Resource graph diagnostics:
   - Step 39 validates the in-loader graph for custom resource declarations, phase visibility, protected namespace writes
     and read-before-write errors.
