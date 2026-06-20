@@ -3078,6 +3078,22 @@ queue build, direct lighting, queued reflection/GI and compose are declared by t
 Deferred runtime. Runtime synchronization is no longer keyed by pass `name`; fixed C++ hooks use the explicit optional
 pass `semantic` field, while execution commands still reference `name`.
 
+Deferred RT should not expose the old raw `execution.deferred.commands` list as the long-term authoring model. The
+runtime can continue to consume an internal ordered command list, but Deferred pack parsing should normalize a safer
+public schema into that list:
+
+```text
+C++ backbone: clear -> gbuffer -> classify -> queues -> lighting -> compose
+slots: fixed semantic implementations selected by slot key / semantic
+passes: custom extension passes without fixed semantic
+insertions: phase -> [custom pass names] lists
+resources: pack-owned logical resources
+```
+
+`execution.deferred.commands` is therefore a transition/runtime IR. The public Deferred schema should be `slots` +
+`passes` + `insertions`, with `insertions` lists controlling extension pass order inside C++-defined phases such as
+`after_gbuffer`, `after_classify`, `after_lighting_queues`, `before_compose` and `after_compose`.
+
 Shaderpack selection is module-scoped:
 
 - `Presets.java` only defines preset identities. A preset persists module attribute overrides in `presetModules`.
@@ -3125,8 +3141,10 @@ Implementation steps:
 
 Remaining implementation steps after Step 36:
 
+- Add Deferred fixed semantic order validation while the runtime still accepts raw `execution.deferred.commands`.
 - Move `ScenePrepare` and `SceneProviderFactory` lifetime to `WorldPipeline` scope so PT and Deferred can share prepared scene runtime without per-module duplication.
-- Add resource validation for Deferred-stage internal images, public exports and scene draw streams.
+- Replace the public Deferred authoring model with `slots`, `passes`, `insertions` and `resources`, then normalize that schema to the internal runtime command list.
+- Add resource validation for Deferred-stage internal images, public exports, scene draw streams and pack-owned logical resources.
 - Expand preset storage/UI so a preset can configure the selected pipeline and each shaderpack-capable module's pack.
 - Define whether cross-module shaderpack resource references are forbidden by validation or represented through explicit
   public pipeline resources. The current design assumes no implicit cross-module shaderpack runtime resources.
@@ -3140,6 +3158,52 @@ Completion standard:
   unknown Deferred execution pass references are covered by Step 30, and module/stage compatibility is covered by
   Step 31. Runtime-plan validation for `render`, `compute`, `ray_query`, fallback ray-query, `lighting_queue` schedule
   and `full_screen compute_3d` is covered by Steps 34-35. Explicit pass `semantic` separation is covered by Step 36.
+
+#### 6.1.1 Deferred shaderpack authoring schema requirements
+
+The first stable Deferred public schema should keep the C++ backbone fixed and expose controlled extension points:
+
+- `slots`: map of fixed semantic slots. Slot key is the fixed semantic (`gbuffer`, `classify`, `direct_light`,
+  `reflection`, `gi`, `compose`, etc.). Pack authors can replace the shader implementation, but cannot create new fixed
+  semantic names.
+- `resources`: pack-owned logical images/textures/buffers. Authors name resources such as `custom.ssao` and
+  `custom.noise`; C++ owns the actual Vulkan image/buffer allocation, descriptor slots, layouts, barriers, resizing and
+  VR layer handling.
+- `passes`: custom extension passes. First stable version should allow compute/full-screen compute only. Custom passes
+  must not declare fixed `semantic`; they are connected through `insertions` plus `inputs`/`outputs`.
+- `insertions`: phase lists such as `{ "after_classify": ["custom_ssao"] }`. The list order is the phase-local
+  execution order. Do not expose arbitrary `after: pass_name` dependencies in the first version.
+
+Required authoring features:
+
+- Attributes/uniforms:
+  - Existing `ShaderPack` attributes already provide static attribute values, shader define generation and expression
+    variables. Deferred's new schema should support a compact object/map form with UI metadata such as `default`,
+    `min` and `max`, then lower it into the existing attribute system.
+  - Runtime tuning values needed by shaders should lower to Deferred execution variables or generated uniform buffers,
+    not hard-coded constants.
+- Defines/permutations:
+  - Keep simple root/pass defines as a first-class feature, e.g. `RADIANCE_HIGH_QUALITY_GI` and
+    `RADIANCE_USE_BLUE_NOISE`.
+  - Variant/permutation support can stay minimal in the first version, but the schema should not block
+    `quality: low/medium/high/ultra` style variants later.
+- Feature requirements/fallbacks:
+  - Declare required capabilities and fallback policy at pack/pass/slot level: ray query, multiview, storage image
+    format support, half precision and similar device-dependent features.
+  - The runtime must choose supported fallback shaders or fail at build/lint time with a precise error.
+- Resource lifetime policy:
+  - Pack-owned resources must declare lifetime: `per_frame`, `history`, `persistent` or `imported_texture`.
+  - `history` resources are required for temporal effects and must survive across frames with correct resize handling.
+- Debug outputs:
+  - Pack authors must be able to expose logical resources to debug views and offline tools, for example SSAO, wetness,
+    masks or intermediate lighting.
+  - Debug outputs should name the resource and display format (`grayscale`, `rgba`, false color, etc.).
+- Offline lint / expanded graph report:
+  - Provide a developer command such as `radiance-dev lint pack/`.
+  - The report must include expanded pass order, resource reads/writes, generated barrier plan, generated descriptor
+    binding map, invalid phase errors, unused resource warnings and unsupported feature warnings.
+  - This tool is more important than exposing lower-level Vulkan controls; without it, shaderpack authors cannot debug
+    resource graph mistakes efficiently.
 
 #### 6.2 Add view/layer execution declarations
 

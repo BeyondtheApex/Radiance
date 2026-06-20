@@ -1582,3 +1582,65 @@ Status: in progress
   - Add shaderpack lint/offline validation for required Deferred ABI semantics, duplicate semantic tags and semantic/pass type compatibility.
   - Move `ScenePrepare` and `SceneProviderFactory` lifetime to `WorldPipeline` scope so PT and Deferred share scene runtime cleanly.
   - Add in-game, VR and preset switching tests before freezing the framework.
+
+### Step 37: Deferred Semantic Order Validation and Public Schema Requirements
+
+- Status: completed.
+- Target files:
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_shaderpack.hpp`
+  - `MCVR-custom/src/core/render/modules/world/deferred_rt/deferred_rt_shaderpack.cpp`
+  - `MCVR-custom/tests/deferred_rt_shaderpack_test.cpp`
+  - `Radiance-custom/docs/deferred-rt-module-architecture.md`
+  - `Radiance-custom/docs/deferred-rt-implementation-log.md`
+- Reason for this step:
+  - Step 36 separated `name` and `semantic`, but raw `execution.deferred.commands` can still express invalid Deferred
+    main-pipeline order during the transition period.
+  - Deferred RT cannot safely expose an arbitrary global execution graph like PT because the backbone has real content
+    dependencies: G-buffer before classification, classification before queue build, queues before queued reflection/GI,
+    lighting before compose.
+  - The long-term public schema should be C++ backbone + fixed semantic slots + phase insertion lists + logical
+    resources, while the current C++ recorder can continue consuming an internally generated ordered command list.
+- Implemented:
+  - Added runtime-plan validation for fixed Deferred semantics:
+    - known fixed semantic enum,
+    - duplicate fixed semantic rejection,
+    - fixed semantic type checks,
+    - fixed semantic schedule checks,
+    - top-level fixed semantic ordering checks.
+  - Fixed semantic pass order is validated against:
+    - `clear_contract`,
+    - `gbuffer`,
+    - `classify`,
+    - `build_lighting_queues`,
+    - `direct_light`,
+    - `reflection`,
+    - `gi`,
+    - `compose`.
+  - Fixed semantic passes cannot be hidden inside conditional or looped execution commands.
+  - Extended `deferred_rt_shaderpack_test` for valid built-in-style semantic order, G-buffer-after-classify order
+    rejection and fixed semantic type mismatch rejection.
+- Public schema requirements recorded:
+  - `execution.deferred.commands` is a transition/runtime IR, not the desired long-term Deferred authoring model.
+  - Deferred public schema should become `slots` + `passes` + `insertions` + `resources`, normalized by C++ into the
+    internal command list.
+  - Pack author requirements now tracked explicitly:
+    - attributes/uniforms with UI metadata such as default/min/max,
+    - simple defines and future variants/permutations,
+    - feature requirements and fallback policy,
+    - resource lifetime policy (`per_frame`, `history`, `persistent`, `imported_texture`),
+    - debug outputs for logical resources,
+    - offline lint / expanded graph report.
+- Verification:
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target deferred_rt_shaderpack_test -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully.
+  - `MCVR-custom/build-radiance-custom/tests/Release/deferred_rt_shaderpack_test.exe` completed successfully.
+  - `cmake --build MCVR-custom/build-radiance-custom --config Release --target core mcvr_tests -- /m:1 /p:CL_MPCount=1 /v:minimal` completed successfully with `D:\VulkanSDK\1.4.335.0\Bin` prepended to `PATH`.
+  - `ctest --test-dir MCVR-custom/build-radiance-custom -C Release --output-on-failure` completed successfully: 9/9 tests passed.
+- Remaining work:
+  - Build the new Deferred public schema parser/normalizer for `slots`, custom `passes`, phase `insertions` and
+    pack-owned logical `resources`.
+  - Lower the normalized schema to the existing internal runtime pass registry and ordered command list.
+  - Add resource visibility rules per phase and enforce them in validation/lint.
+  - Extend the existing ShaderPack attribute/definition system with Deferred's compact object/map form, simple root
+    defines and UI metadata.
+  - Implement feature/fallback validation and debug output registry.
+  - Add the offline lint/report command.
